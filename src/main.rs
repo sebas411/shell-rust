@@ -3,6 +3,7 @@ use std::{io::{self, Write}, process};
 fn main() {
     let mut input;
     let error_code;
+    let builtins = ["echo", "exit", "type"];
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
@@ -30,6 +31,18 @@ fn main() {
             break;
         } else if command == "echo" {
             println!("{}", args);
+        } else if command == "type" {
+            let mut found_builtin = false;
+            for builtin in builtins {
+                if builtin == args {
+                    println!("{} is a shell builtin", args);
+                    found_builtin = true;
+                    break;
+                }
+            }
+            if !found_builtin {
+                println!("{}: not found", args);
+            }
         } else {
             println!("{}: command not found", command);
         }
