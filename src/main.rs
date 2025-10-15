@@ -1,4 +1,4 @@
-use std::{env, fs, io::{self, Write}, os::unix::fs::PermissionsExt, process};
+use std::{env, fs, io::{self, Write}, os::unix::fs::PermissionsExt, process::{self, Command}};
 
 fn find_executable(executable_name: &str) -> Option<String> {
     let path_var = env::var("PATH").unwrap();
@@ -80,7 +80,21 @@ fn main() {
                 println!("{}: not found", args);
             }
         } else {
-            println!("{}: command not found", command);
+            let result = find_executable(command);
+            let found_executable = result.is_some();
+            if found_executable {
+                let executable_path = result.unwrap();
+                let output;
+                if args == "" {
+                    output = Command::new(executable_path).output().unwrap();
+                } else {
+                    let args_to_pass = args.split(' ').collect::<Vec<&str>>();
+                    output = Command::new(executable_path).args(args_to_pass).output().unwrap();
+                }
+                println!("{}", String::from_utf8(output.stdout).unwrap());
+            } else {
+                println!("{}: command not found", command);
+            }
         }
     }
     process::exit(error_code)
