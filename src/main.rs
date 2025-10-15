@@ -36,6 +36,7 @@ fn main() {
     let error_code;
     let builtins = ["echo", "exit", "type", "pwd", "cd", "history"];
     let mut current_dir = env::current_dir().unwrap();
+    let mut history = vec![];
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
@@ -53,6 +54,8 @@ fn main() {
         } else {
             command = input.trim();
         }
+        let history_command = String::from(input.trim());
+        history.push(history_command);
 
         if command == "exit" {
             if args != "" {
@@ -120,7 +123,9 @@ fn main() {
                 println!("cd: {}: No such file or directory", args);
             }
         } else if command == "history" {
-            println!("Not implemented yet");
+            for inst in &history {
+                println!("{}", inst);
+            }
         } else {
             let result = find_executable(command);
             let found_executable = result.is_some();
