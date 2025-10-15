@@ -121,10 +121,12 @@ fn main() {
                 println!("cd: {}: No such file or directory", args);
             }
         } else if command == "history" {
-            let mut command_num = 0;
-            for inst in &history {
-                command_num += 1;
-                println!("    {}  {}", command_num, inst);
+            let mut start = 0;
+            if args != "" {
+                start = history.len() - usize::from_str_radix(args, 10).unwrap();
+            }
+            for command_num in start..history.len() {
+                println!("    {}  {}", command_num + 1, history[command_num]);
             }
         } else {
             let result = find_executable(command);
