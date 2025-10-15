@@ -9,23 +9,21 @@ use std::process::{self, Command};
 fn find_executable(executable_name: &str) -> Option<String> {
     let path_var = env::var("PATH").unwrap();
     for dir_name in path_var.split(":") {
-        let result = fs::read_dir(dir_name);
-        if result.is_err() {
+        let dir_path = PathBuf::from(dir_name);
+        if !dir_path.exists() {
             continue;
         }
-        let files = result.unwrap();
-        for file in files {
-            let file = file.unwrap().path();
-            if file.is_file() {
-                let metadata = fs::metadata(&file).unwrap();
-                let permissions = metadata.permissions();
-                let mode: u16 = permissions.mode() as u16;
-                let executable: u16 = 493u16;
-                let is_executable = (mode & executable) == executable;
-                if is_executable && file.file_name().unwrap() == executable_name {
-                    return Some(String::from(file.to_str().unwrap()));
-                }
-            }
+        let exec_path = dir_path.join(executable_name);
+        if !exec_path.exists() {
+            continue;
+        }
+        let metadata = fs::metadata(&exec_path).unwrap();
+        let permissions = metadata.permissions();
+        let mode: u16 = permissions.mode() as u16;
+        let executable: u16 = 493u16;
+        let is_executable = (mode & executable) == executable;
+        if is_executable {
+            return Some(String::from(exec_path.to_str().unwrap()));
         }
     }
     return None;
@@ -123,8 +121,10 @@ fn main() {
                 println!("cd: {}: No such file or directory", args);
             }
         } else if command == "history" {
+            let mut command_num = 0;
             for inst in &history {
-                println!("{}", inst);
+                command_num += 1;
+                println!("    {}  {}", command_num, inst);
             }
         } else {
             let result = find_executable(command);
