@@ -89,7 +89,23 @@ fn main() {
             println!("{}", current_dir.to_str().unwrap());
         } else if command == "cd" {
             let path = PathBuf::from(args);
-            if path.exists() {
+            if path.is_relative() {
+                let mut path_built: PathBuf = current_dir.clone();
+                for part in path.iter() {
+                    if part == "." {
+                        path_built = current_dir.clone();
+                    } else if part == ".." {
+                        path_built.pop();
+                    } else {
+                        path_built = path_built.join(part);
+                    }
+                }
+                if path_built.exists() {
+                    current_dir = path_built;
+                } else {
+                    println!("cd: {}: No such file or directory", args);
+                }
+            } else if path.exists() {
                 current_dir = path;
             } else {
                 println!("cd: {}: No such file or directory", args);
