@@ -28,6 +28,8 @@ fn main() {
                 error_code = 0;
             }
             break;
+        } else if command == "echo" {
+            println!("{}", args);
         } else {
             println!("{}: command not found", command);
         }
