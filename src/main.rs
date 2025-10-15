@@ -1,4 +1,5 @@
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -88,7 +89,15 @@ fn main() {
         } else if command == "pwd" {
             println!("{}", current_dir.to_str().unwrap());
         } else if command == "cd" {
-            let path = PathBuf::from(args);
+            let mut path = PathBuf::from(args);
+            if path.iter().nth(0).unwrap() == "~" {
+                let old_path = path.clone();
+                path = PathBuf::from(env::var("HOME").unwrap());
+                let sub_dir_vec: Vec<&OsStr> = old_path.iter().skip(1).collect();
+                for d in sub_dir_vec {
+                    path = path.join(d);
+                }
+            }
             if path.is_relative() {
                 let mut path_built: PathBuf = current_dir.clone();
                 for part in path.iter() {
