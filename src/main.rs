@@ -34,7 +34,7 @@ fn find_executable(executable_name: &str) -> Option<String> {
 fn main() {
     let mut input;
     let error_code;
-    let builtins = ["echo", "exit", "type", "pwd", "cd"];
+    let builtins = ["echo", "exit", "type", "pwd", "cd", "history"];
     let mut current_dir = env::current_dir().unwrap();
     loop {
         print!("$ ");
@@ -119,6 +119,8 @@ fn main() {
             } else {
                 println!("cd: {}: No such file or directory", args);
             }
+        } else if command == "history" {
+            println!("Not implemented yet");
         } else {
             let result = find_executable(command);
             let found_executable = result.is_some();
