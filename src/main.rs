@@ -33,7 +33,7 @@ fn find_executable(executable_name: &str) -> Option<String> {
 fn main() {
     let mut input;
     let error_code;
-    let builtins = ["echo", "exit", "type"];
+    let builtins = ["echo", "exit", "type", "pwd"];
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
@@ -84,6 +84,9 @@ fn main() {
             if  !found_executable {
                 println!("{}: not found", args);
             }
+        } else if command == "pwd" {
+            let current_dir = env::current_dir().unwrap();
+            println!("{}", current_dir.to_str().unwrap());
         } else {
             let result = find_executable(command);
             let found_executable = result.is_some();
