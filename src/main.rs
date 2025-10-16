@@ -217,6 +217,9 @@ fn main() {
     if hist_file.exists() {
         let hist_file_contents =  fs::read_to_string(hist_file).unwrap();
         for hist_file_line in hist_file_contents.trim().split('\n') {
+            if hist_file_line == "" {
+                continue;
+            }
             line_reader.insert_history_entry(hist_file_line, interactive);
         }
     }
