@@ -1,7 +1,7 @@
 use std::env;
 use std::ffi::OsStr;
-use std::fs;
-use std::io::{self, Write};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write, Read};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{self, Command};
@@ -172,7 +172,6 @@ fn find_executable(executable_name: &str) -> Option<String> {
 }
 
 fn read_key() -> String {
-    use std::io::Read;
     let mut stdin = std::io::stdin();
     let mut buf = [0; 3];
     stdin.read_exact(&mut buf[..1]).unwrap();
@@ -301,14 +300,25 @@ fn main() {
                     start = history.len() - result.unwrap();
                 } else {
                     let args = args.split(' ').collect::<Vec<&str>>();
-                    if args.len() == 2 && args[0] == "-r" {
-                        let file_path = PathBuf::from(args[1]);
-                        if file_path.exists() {
-                            let file_contents = fs::read_to_string(file_path).unwrap();
-                            for file_line in file_contents.split('\n') {
-                                if file_line != "" {
-                                    line_reader.insert_history_entry(file_line, interactive);
+                    if args.len() == 2 {
+                        // read
+                        if args[0] == "-r" {
+                            let file_path = PathBuf::from(args[1]);
+                            if file_path.exists() {
+                                let file_contents = fs::read_to_string(file_path).unwrap();
+                                for file_line in file_contents.split('\n') {
+                                    if file_line != "" {
+                                        line_reader.insert_history_entry(file_line, interactive);
+                                    }
                                 }
+                            }
+                        }
+                        // write
+                        else if args[0] == "-w" {
+                            let file_path = PathBuf::from(args[1]);
+                            let mut file = OpenOptions::new().create(true).write(true).open(file_path).unwrap();
+                            for entry in history {
+                                file.write_fmt(format_args!("{}\n", entry)).unwrap();
                             }
                         }
                     }
@@ -318,7 +328,7 @@ fn main() {
             for command_num in start..history.len() {
                 println!("    {}  {}", command_num + 1, history[command_num]);
             }
-        } else {
+        } else { // executable commands
             let result = find_executable(command);
             let found_executable = result.is_some();
             if found_executable {
