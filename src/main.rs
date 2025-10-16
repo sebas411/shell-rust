@@ -210,8 +210,8 @@ fn main() {
     let error_code;
     let builtins = ["echo", "exit", "type", "pwd", "cd", "history"];
     let mut current_dir = env::current_dir().unwrap();
+
     loop {
-    
         // Wait for user input
         input = line_reader.read_line("$ ", interactive);
 
@@ -296,7 +296,24 @@ fn main() {
             let history = line_reader.get_history();
             let mut start = 0;
             if args != "" {
-                start = history.len() - usize::from_str_radix(args, 10).unwrap();
+                let result = usize::from_str_radix(args, 10);
+                if result.is_ok() {
+                    start = history.len() - result.unwrap();
+                } else {
+                    let args = args.split(' ').collect::<Vec<&str>>();
+                    if args.len() == 2 && args[0] == "-r" {
+                        let file_path = PathBuf::from(args[1]);
+                        if file_path.exists() {
+                            let file_contents = fs::read_to_string(file_path).unwrap();
+                            for file_line in file_contents.split('\n') {
+                                if file_line != "" {
+                                    line_reader.insert_history_entry(file_line, interactive);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
             }
             for command_num in start..history.len() {
                 println!("    {}  {}", command_num + 1, history[command_num]);
