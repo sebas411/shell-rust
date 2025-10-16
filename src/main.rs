@@ -215,7 +215,7 @@ fn main() {
     //read history file
     let hist_file = PathBuf::from(hist_file);
     if hist_file.exists() {
-        let hist_file_contents =  fs::read_to_string(hist_file).unwrap();
+        let hist_file_contents =  fs::read_to_string(&hist_file).unwrap();
         for hist_file_line in hist_file_contents.trim().split('\n') {
             if hist_file_line == "" {
                 continue;
@@ -368,6 +368,13 @@ fn main() {
             } else {
                 println!("{}: command not found", command);
             }
+        }
+    }
+    if error_code == 0 && hist_file.exists() {
+        let mut file = OpenOptions::new().create(true).append(true).open(hist_file).unwrap();
+        let history = line_reader.get_history();
+        for entry in history {
+            file.write_fmt(format_args!("{}\n", entry)).unwrap();
         }
     }
     process::exit(error_code)
