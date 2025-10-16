@@ -201,6 +201,42 @@ fn read_key() -> String {
     (buf[0] as char).to_string()
 }
 
+fn split_args(input: &str) -> Vec<String> {
+    let mut args = vec![];
+    let mut current_arg = String::new();
+    let mut in_whitespace = false;
+    let mut in_single_quote = false;
+
+    for c in input.chars() {
+        if in_single_quote {
+            if c == '\'' {
+                in_single_quote = false;
+            } else {
+                current_arg.push(c);
+            }
+            continue;
+        }
+
+        if c == ' ' {
+            if in_whitespace {
+                continue;
+            }
+            args.push(current_arg);
+            current_arg = String::new();
+            in_whitespace = true;
+            continue;
+        } else if c == '\'' {
+            in_single_quote = true;
+        } else {
+            current_arg.push(c);
+        }
+        in_whitespace = false;
+
+    }
+    args.push(current_arg);
+    args
+}
+
 fn main() {
     let is_codecrafters = env::var("CODECRAFTERS_TEST_RUNNER_ID").is_ok();
     let interactive = atty::is(Stream::Stdout) && !is_codecrafters;
@@ -230,32 +266,32 @@ fn main() {
         // Wait for user input
         input = line_reader.read_line("$ ", interactive);
 
-        let try_split = input.trim().split_once(' ');
-        let command;
-        let mut args: &str = &String::new();
-    
-        if try_split.is_some() {
-            (command, args) = try_split.unwrap();
-        } else {
-            command = input.trim();
+        let args = split_args(&input);
+        if args.len() == 0 {
+            continue;
         }
+        let command = &args[0];
+
         let history_command = String::from(input.trim());
         line_reader.insert_history_entry(&history_command, interactive);
 
         if command == "exit" {
-            if args != "" {
-                error_code = i32::from_str_radix(args, 10).unwrap();
+            if args.len() > 1 {
+                error_code = i32::from_str_radix(&args[1], 10).unwrap();
             } else {
                 error_code = 0;
             }
             break;
         } else if command == "echo" {
-            println!("{}", args);
+            println!("{}", args[1..].join(" "));
         } else if command == "type" {
+            if args.len() == 1 {
+                continue;
+            }
             let mut found_builtin = false;
             for builtin in builtins {
-                if builtin == args {
-                    println!("{} is a shell builtin", args);
+                if builtin == args[1] {
+                    println!("{} is a shell builtin", args[1]);
                     found_builtin = true;
                     break;
                 }
@@ -263,21 +299,24 @@ fn main() {
             if found_builtin {
                 continue;
             }
-            let result = find_executable(args);
+            let result = find_executable(&args[1]);
             let found_executable = result.is_some();
 
             if found_executable {
                 let executable_path = result.unwrap();
-                println!("{} is {}", args, executable_path);
+                println!("{} is {}", args[1], executable_path);
             }
 
             if  !found_executable {
-                println!("{}: not found", args);
+                println!("{}: not found", args[1]);
             }
         } else if command == "pwd" {
             println!("{}", current_dir.to_str().unwrap());
         } else if command == "cd" {
-            let mut path = PathBuf::from(args);
+            if args.len() == 1 {
+                continue;
+            }
+            let mut path = PathBuf::from(&args[1]);
             if path.iter().nth(0).unwrap() == "~" {
                 let old_path = path.clone();
                 path = PathBuf::from(env::var("HOME").unwrap());
@@ -300,26 +339,26 @@ fn main() {
                 if path_built.exists() {
                     current_dir = path_built;
                 } else {
-                    println!("cd: {}: No such file or directory", args);
+                    println!("cd: {}: No such file or directory", args[1]);
                 }
             } else if path.exists() {
                 current_dir = path;
             } else {
-                println!("cd: {}: No such file or directory", args);
+                println!("cd: {}: No such file or directory", args[1]);
             }
         } else if command == "history" {
             let history = line_reader.get_history();
             let mut start = 0;
-            if args != "" {
-                let result = usize::from_str_radix(args, 10);
+            if args.len() > 1 {
+                let result = usize::from_str_radix(&args[1], 10);
                 if result.is_ok() {
                     start = history.len() - result.unwrap();
                 } else {
-                    let args = args.split(' ').collect::<Vec<&str>>();
+                    let args = args[1..].to_vec();
                     if args.len() == 2 {
                         // read
                         if args[0] == "-r" {
-                            let file_path = PathBuf::from(args[1]);
+                            let file_path = PathBuf::from(&args[1]);
                             if file_path.exists() {
                                 let file_contents = fs::read_to_string(file_path).unwrap();
                                 for file_line in file_contents.split('\n') {
@@ -331,7 +370,7 @@ fn main() {
                         }
                         // write
                         else if args[0] == "-w" {
-                            let file_path = PathBuf::from(args[1]);
+                            let file_path = PathBuf::from(&args[1]);
                             let mut file = OpenOptions::new().create(true).write(true).open(file_path).unwrap();
                             for entry in history {
                                 file.write_fmt(format_args!("{}\n", entry)).unwrap();
@@ -339,7 +378,7 @@ fn main() {
                         }
                         // append
                         else if args[0] == "-a" {
-                            let file_path = PathBuf::from(args[1]);
+                            let file_path = PathBuf::from(&args[1]);
                             let mut file = OpenOptions::new().create(false).append(true).open(file_path).unwrap();
                             for entry in &history[history_appended..] {
                                 file.write_fmt(format_args!("{}\n", entry)).unwrap();
@@ -354,16 +393,16 @@ fn main() {
                 println!("    {}  {}", command_num + 1, history[command_num]);
             }
         } else { // executable commands
-            let result = find_executable(command);
+            let result = find_executable(&command);
             let found_executable = result.is_some();
             if found_executable {
                 let executable_path = PathBuf::from(result.unwrap());
                 let executable_path = executable_path.file_name().unwrap();
                 let output;
-                if args == "" {
+                if args.len() == 1 {
                     output = Command::new(executable_path).output().unwrap();
                 } else {
-                    let args_to_pass = args.split(' ').collect::<Vec<&str>>();
+                    let args_to_pass = args[1..].to_vec();
                     output = Command::new(executable_path).args(args_to_pass).output().unwrap();
                 }
                 print!("{}", String::from_utf8(output.stdout).unwrap());
