@@ -5,6 +5,117 @@ use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{self, Command};
+use crossterm::terminal::{enable_raw_mode, disable_raw_mode};
+
+struct LineBuffer {
+    buf: Vec<char>,
+    cursor: usize,
+    history: Vec<String>,
+    history_cursor: usize,
+}
+
+impl LineBuffer {
+    fn new() -> Self {
+        Self { buf: vec![], cursor: 0, history: vec![], history_cursor: 0 }
+    }
+
+    fn clear(&mut self) {
+        self.buf = vec![];
+        self.cursor = 0;
+    }
+
+    fn insert(&mut self, c: char) {
+        self.buf.insert(self.cursor, c);
+        self.cursor += 1;
+    }
+
+    fn insert_history_entry(&mut self, entry: &str) {
+        if self.history.len() == 0 || entry != self.history.last().unwrap() {
+            self.history.push(String::from(entry));
+            self.history_cursor = self.history.len();
+        }
+    }
+
+    fn get_history(&self) -> Vec<String> {
+        self.history.clone()
+    }
+
+    fn delete_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+            self.buf.remove(self.cursor);
+        }
+    }
+
+    fn delete_right(&mut self) {
+        if self.cursor < self.buf.len() {
+            self.buf.remove(self.cursor);
+        }
+    }
+
+    fn move_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+    }
+
+    fn move_right(&mut self) {
+        if self.cursor < self.buf.len() {
+            self.cursor += 1;
+        }
+    }
+
+    fn move_up_history(&mut self) {
+        if self.history_cursor > 0 {
+            let at_end = self.cursor == self.buf.len();
+            self.history_cursor -= 1;
+            self.buf = self.history[self.history_cursor].chars().collect();
+            if self.cursor > self.buf.len() {
+                self.cursor = self.buf.len();
+            } else if at_end {
+                self.cursor = self.buf.len();
+            }
+        }
+    }
+
+    fn render(&self, prompt: &str) {
+        print!("\r\x1B[K{}{}", prompt, self.to_str());
+        let diff = self.buf.len() - self.cursor;
+        if diff > 0 {
+            print!("\x1B[{}D", diff);
+        }
+        io::stdout().flush().unwrap();
+    }
+
+    fn read_line(&mut self, prompt: &str) -> String {
+        print!("\r\x1B[K{}", prompt);
+        io::stdout().flush().unwrap();
+        enable_raw_mode().unwrap();
+        self.clear();
+        loop {
+            let key = read_key();
+            match key.as_str() {
+                "\r" => break,
+                "left" => self.move_left(),
+                "right" => self.move_right(),
+                "up" => self.move_up_history(),
+                "\x7F" => self.delete_left(),
+                "delete" => self.delete_right(),
+                s if s.len() == 1 => self.insert(s.chars().next().unwrap()),
+                _ => {}
+            }
+            self.render(prompt);
+        }
+        self.history_cursor = self.history.len();
+        disable_raw_mode().unwrap();
+        println!();
+        self.to_str()
+    }
+
+    fn to_str(&self) -> String {
+        self.buf.iter().collect::<String>()
+    }
+}
 
 fn find_executable(executable_name: &str) -> Option<String> {
     let path_var = env::var("PATH").unwrap();
@@ -29,19 +140,47 @@ fn find_executable(executable_name: &str) -> Option<String> {
     return None;
 }
 
+fn read_key() -> String {
+    use std::io::Read;
+    let mut stdin = std::io::stdin();
+    let mut buf = [0; 3];
+    stdin.read_exact(&mut buf[..1]).unwrap();
+
+    if buf[0] == 0x1B {
+        // Possible escape sequence
+        if stdin.read(&mut buf[1..]).unwrap_or(0) == 2 {
+            match &buf {
+                [0x1B, 0x5B, 0x41] => return "up".into(),
+                [0x1B, 0x5B, 0x42] => return "down".into(),
+                [0x1B, 0x5B, 0x43] => return "right".into(),
+                [0x1B, 0x5B, 0x44] => return "left".into(),
+                [0x1B, 0x5B, 0x33] => {
+                    stdin.read_exact(&mut buf[..1]).unwrap();
+                    if buf[0] == 0x7E {
+                        return "delete".into()
+                    } else {
+                        return "escape".into()
+                    }
+                },
+                _ => return "escape".into(),
+            }
+        } else {
+            return "escape".into();
+        }
+    }
+    (buf[0] as char).to_string()
+}
+
 fn main() {
+    let mut line_reader = LineBuffer::new();
     let mut input;
     let error_code;
     let builtins = ["echo", "exit", "type", "pwd", "cd", "history"];
     let mut current_dir = env::current_dir().unwrap();
-    let mut history = vec![];
     loop {
-        print!("$ ");
-        io::stdout().flush().unwrap();
     
         // Wait for user input
-        input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        input = line_reader.read_line("$ ");
 
         let try_split = input.trim().split_once(' ');
         let command;
@@ -53,7 +192,7 @@ fn main() {
             command = input.trim();
         }
         let history_command = String::from(input.trim());
-        history.push(history_command);
+        line_reader.insert_history_entry(&history_command);
 
         if command == "exit" {
             if args != "" {
@@ -121,6 +260,7 @@ fn main() {
                 println!("cd: {}: No such file or directory", args);
             }
         } else if command == "history" {
+            let history = line_reader.get_history();
             let mut start = 0;
             if args != "" {
                 start = history.len() - usize::from_str_radix(args, 10).unwrap();
