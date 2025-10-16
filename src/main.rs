@@ -205,12 +205,22 @@ fn split_args(input: &str) -> Vec<String> {
     let mut args = vec![];
     let mut current_arg = String::new();
     let mut in_whitespace = false;
-    let mut in_single_quote = false;
+    let mut in_single_quotes = false;
+    let mut in_double_quotes = false;
 
     for c in input.chars() {
-        if in_single_quote {
+        if in_single_quotes {
             if c == '\'' {
-                in_single_quote = false;
+                in_single_quotes = false;
+            } else {
+                current_arg.push(c);
+            }
+            continue;
+        }
+
+        if in_double_quotes {
+            if c == '"' {
+                in_double_quotes = false;
             } else {
                 current_arg.push(c);
             }
@@ -226,7 +236,9 @@ fn split_args(input: &str) -> Vec<String> {
             in_whitespace = true;
             continue;
         } else if c == '\'' {
-            in_single_quote = true;
+            in_single_quotes = true;
+        } else if c == '"' {
+            in_double_quotes = true;
         } else {
             current_arg.push(c);
         }
