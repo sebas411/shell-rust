@@ -209,6 +209,7 @@ fn main() {
     let error_code;
     let builtins = ["echo", "exit", "type", "pwd", "cd", "history"];
     let mut current_dir = env::current_dir().unwrap();
+    let mut history_appended = 0;
 
     loop {
         // Wait for user input
@@ -319,6 +320,15 @@ fn main() {
                             let mut file = OpenOptions::new().create(true).write(true).open(file_path).unwrap();
                             for entry in history {
                                 file.write_fmt(format_args!("{}\n", entry)).unwrap();
+                            }
+                        }
+                        // append
+                        else if args[0] == "-a" {
+                            let file_path = PathBuf::from(args[1]);
+                            let mut file = OpenOptions::new().create(false).append(true).open(file_path).unwrap();
+                            for entry in &history[history_appended..] {
+                                file.write_fmt(format_args!("{}\n", entry)).unwrap();
+                                history_appended += 1;
                             }
                         }
                     }
