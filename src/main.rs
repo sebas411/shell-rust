@@ -211,6 +211,7 @@ fn main() {
     let mut current_dir = env::current_dir().unwrap();
     let mut history_appended = 0;
     let hist_file = env::var("HISTFILE").unwrap_or(String::from("~/.ssh_history"));
+    let mut entries_read = 0;
 
     //read history file
     let hist_file = PathBuf::from(hist_file);
@@ -221,6 +222,7 @@ fn main() {
                 continue;
             }
             line_reader.insert_history_entry(hist_file_line, interactive);
+            entries_read += 1;
         }
     }
 
@@ -373,7 +375,7 @@ fn main() {
     if error_code == 0 && hist_file.exists() {
         let mut file = OpenOptions::new().create(true).append(true).open(hist_file).unwrap();
         let history = line_reader.get_history();
-        for entry in history {
+        for entry in &history[entries_read..] {
             file.write_fmt(format_args!("{}\n", entry)).unwrap();
         }
     }
