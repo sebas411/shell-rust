@@ -210,6 +210,16 @@ fn main() {
     let builtins = ["echo", "exit", "type", "pwd", "cd", "history"];
     let mut current_dir = env::current_dir().unwrap();
     let mut history_appended = 0;
+    let hist_file = env::var("HISTFILE").unwrap_or(String::from("~/.ssh_history"));
+
+    //read history file
+    let hist_file = PathBuf::from(hist_file);
+    if hist_file.exists() {
+        let hist_file_contents =  fs::read_to_string(hist_file).unwrap();
+        for hist_file_line in hist_file_contents.trim().split('\n') {
+            line_reader.insert_history_entry(hist_file_line, interactive);
+        }
+    }
 
     loop {
         // Wait for user input
