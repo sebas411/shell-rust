@@ -6,6 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{self, Command};
 use crossterm::terminal::{enable_raw_mode, disable_raw_mode};
+use atty::Stream;
 
 struct LineBuffer {
     buf: Vec<char>,
@@ -87,8 +88,12 @@ impl LineBuffer {
         io::stdout().flush().unwrap();
     }
 
-    fn read_line(&mut self, prompt: &str) -> String {
-        print!("\r\x1B[K{}", prompt);
+    fn read_line(&mut self, prompt: &str, interactive: bool) -> String {
+        if interactive {
+            print!("\r\x1B[K{}", prompt);
+        } else {
+            print!("{}", prompt)
+        }
         io::stdout().flush().unwrap();
         enable_raw_mode().unwrap();
         self.clear();
@@ -96,6 +101,7 @@ impl LineBuffer {
             let key = read_key();
             match key.as_str() {
                 "\r" => break,
+                "\n" => break,
                 "left" => self.move_left(),
                 "right" => self.move_right(),
                 "up" => self.move_up_history(),
@@ -104,8 +110,19 @@ impl LineBuffer {
                 s if s.len() == 1 => self.insert(s.chars().next().unwrap()),
                 _ => {}
             }
-            self.render(prompt);
+            if interactive {
+                self.render(prompt);
+            } else {
+                if key == "up" {
+                    print!("\r\x1B[K{}", prompt);
+                    print!("{}", self.to_str());
+                    io::stdout().flush().unwrap();
+                } else {
+                    print!("{}", key);
+                }
+            }
         }
+
         self.history_cursor = self.history.len();
         disable_raw_mode().unwrap();
         println!();
@@ -172,6 +189,8 @@ fn read_key() -> String {
 }
 
 fn main() {
+    let is_codecrafters = env::var("CODECRAFTERS_TEST_RUNNER_ID").is_ok();
+    let interactive = atty::is(Stream::Stdout) && !is_codecrafters;
     let mut line_reader = LineBuffer::new();
     let mut input;
     let error_code;
@@ -180,7 +199,7 @@ fn main() {
     loop {
     
         // Wait for user input
-        input = line_reader.read_line("$ ");
+        input = line_reader.read_line("$ ", interactive);
 
         let try_split = input.trim().split_once(' ');
         let command;
