@@ -71,9 +71,22 @@ impl LineBuffer {
             let at_end = self.cursor == self.buf.len();
             self.history_cursor -= 1;
             self.buf = self.history[self.history_cursor].chars().collect();
-            if self.cursor > self.buf.len() {
+            if self.cursor > self.buf.len() || at_end {
                 self.cursor = self.buf.len();
-            } else if at_end {
+            }
+        }
+    }
+
+    fn move_down_history(&mut self) {
+        if self.history_cursor < self.buf.len() {
+            let at_end = self.cursor == self.buf.len();
+            self.history_cursor += 1;
+            if self.history_cursor == self.history.len() {
+                self.buf = vec![];
+            } else {
+                self.buf = self.history[self.history_cursor].chars().collect();
+            }
+            if self.cursor > self.buf.len() || at_end {
                 self.cursor = self.buf.len();
             }
         }
@@ -105,6 +118,7 @@ impl LineBuffer {
                 "left" => self.move_left(),
                 "right" => self.move_right(),
                 "up" => self.move_up_history(),
+                "down" => self.move_down_history(),
                 "\x7F" => self.delete_left(),
                 "delete" => self.delete_right(),
                 s if s.len() == 1 => self.insert(s.chars().next().unwrap()),
@@ -113,7 +127,7 @@ impl LineBuffer {
             if interactive {
                 self.render(prompt);
             } else {
-                if key == "up" {
+                if key == "up" || key == "down" {
                     print!("\r\x1B[K{}", prompt);
                     print!("{}", self.to_str());
                     io::stdout().flush().unwrap();
