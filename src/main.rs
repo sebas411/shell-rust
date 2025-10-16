@@ -30,8 +30,8 @@ impl LineBuffer {
         self.cursor += 1;
     }
 
-    fn insert_history_entry(&mut self, entry: &str) {
-        if self.history.len() == 0 || entry != self.history.last().unwrap() {
+    fn insert_history_entry(&mut self, entry: &str, interactive: bool) {
+        if self.history.len() == 0 || entry != self.history.last().unwrap() || !interactive {
             self.history.push(String::from(entry));
             self.history_cursor = self.history.len();
         }
@@ -211,7 +211,7 @@ fn main() {
             command = input.trim();
         }
         let history_command = String::from(input.trim());
-        line_reader.insert_history_entry(&history_command);
+        line_reader.insert_history_entry(&history_command, interactive);
 
         if command == "exit" {
             if args != "" {
