@@ -13,11 +13,19 @@ struct LineBuffer {
     cursor: usize,
     history: Vec<String>,
     history_cursor: usize,
+    builtins: Vec<String>,
 }
 
 impl LineBuffer {
     fn new() -> Self {
-        Self { buf: vec![], cursor: 0, history: vec![], history_cursor: 0 }
+        Self { buf: vec![], cursor: 0, history: vec![], history_cursor: 0, builtins: vec![] }
+    }
+
+    fn set_builtins(&mut self, builtins: &[&str]) {
+        for builtin in builtins {
+            let builtin = String::from(*builtin);
+            self.builtins.push(builtin);
+        }
     }
 
     fn clear(&mut self) {
@@ -63,6 +71,22 @@ impl LineBuffer {
     fn move_right(&mut self) {
         if self.cursor < self.buf.len() {
             self.cursor += 1;
+        }
+    }
+
+    fn tab_completion(&mut self) {
+        let mut potential = 0;
+        let mut to_complete = String::new();
+        for builtin in &self.builtins {
+            if builtin.contains(&self.buf.iter().collect::<String>()) {
+                potential += 1;
+                to_complete = String::from(builtin);
+            }
+        }
+        if potential == 1 {
+            to_complete.push(' ');
+            self.buf = to_complete.chars().collect::<Vec<char>>();
+            self.cursor = self.buf.len();
         }
     }
 
@@ -120,6 +144,7 @@ impl LineBuffer {
                 "up" => self.move_up_history(),
                 "down" => self.move_down_history(),
                 "\x7F" => self.delete_left(),
+                "\x09" => self.tab_completion(),
                 "delete" => self.delete_right(),
                 s if s.len() == 1 => self.insert(s.chars().next().unwrap()),
                 _ => {}
@@ -279,6 +304,8 @@ fn main() {
     let hist_file = env::var("HISTFILE").unwrap_or(String::from("~/.ssh_history"));
     let mut entries_read = 0;
 
+    line_reader.set_builtins(&builtins);
+
     //read history file
     let hist_file = PathBuf::from(hist_file);
     if hist_file.exists() {
@@ -343,7 +370,7 @@ fn main() {
         // handle commands
         if command == "exit" {
             if args.len() > 1 {
-                error_code = i32::from_str_radix(&args[1], 10).unwrap();
+                error_code = i32::from_str_radix(&args[1], 10).unwrap_or(0);
             } else {
                 error_code = 0;
             }
