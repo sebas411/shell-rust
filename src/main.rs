@@ -297,6 +297,8 @@ fn main() {
         input = line_reader.read_line("$ ", interactive);
         let mut redirect_stdout = None;
         let mut redirect_stderr = None;
+        let mut appending_stdout = false;
+        let mut appending_stderr = false;
 
         let args = split_args(&input);
         if args.len() == 0 {
@@ -312,13 +314,19 @@ fn main() {
                 continue;
             }
             let arg = String::from(&args[i]);
-            if redirect_stdout.is_none() &&  (arg == ">" || arg == "1>") && args.len() > i + 1 {
+            if redirect_stdout.is_none() &&  (arg == ">" || arg == "1>" || arg == ">>" || arg == "1>>") && args.len() > i + 1 {
                 redirect_stdout = Some(String::from(&args[i+1]));
+                if arg == ">>" || arg == "1>>" {
+                    appending_stdout = true;
+                }
                 skip_loop = true;
             }
-            if redirect_stderr.is_none() && arg == "2>" && args.len() > i + 1 {
+            if redirect_stderr.is_none() && (arg == "2>" || arg == "2>>") && args.len() > i + 1 {
                 redirect_stderr = Some(String::from(&args[i+1]));
                 skip_loop = true;
+                if arg == "2>>" {
+                    appending_stderr = true;
+                }
             }
             if redirect_stderr.is_none() && redirect_stdout.is_none() {
                 filtered_args.push(arg);
@@ -472,14 +480,14 @@ fn main() {
         
         if redirect_stdout.is_some() {
             let stdout_file_path = PathBuf::from(redirect_stdout.unwrap());
-            let mut file = OpenOptions::new().create(true).write(true).open(stdout_file_path).unwrap();
+            let mut file = OpenOptions::new().create(true).write(true).append(appending_stdout).open(stdout_file_path).unwrap();
             file.write(my_stdout.as_bytes()).unwrap();
         } else {
             print!("{}", &my_stdout);
         }
         if redirect_stderr.is_some() {
             let stderr_file_path = PathBuf::from(redirect_stderr.unwrap());
-            let mut file = OpenOptions::new().create(true).write(true).open(stderr_file_path).unwrap();
+            let mut file = OpenOptions::new().create(true).write(true).append(appending_stderr).open(stderr_file_path).unwrap();
             file.write(my_stderr.as_bytes()).unwrap();
         } else {
             eprint!("{}", &my_stderr);
