@@ -78,7 +78,7 @@ impl LineBuffer {
     }
 
     fn move_down_history(&mut self) {
-        if self.history_cursor < self.buf.len() {
+        if self.history_cursor < self.history.len() {
             let at_end = self.cursor == self.buf.len();
             self.history_cursor += 1;
             if self.history_cursor == self.history.len() {
@@ -295,6 +295,8 @@ fn main() {
     loop {
         // Wait for user input
         input = line_reader.read_line("$ ", interactive);
+        let mut redirect_stdout = None;
+        let mut redirect_stderr = None;
 
         let args = split_args(&input);
         if args.len() == 0 {
@@ -302,9 +304,35 @@ fn main() {
         }
         let command = &args[0];
 
+        let mut filtered_args = vec![];
+
+        let mut skip_loop = false;
+        for i in 0..args.len() {
+            if skip_loop {
+                continue;
+            }
+            let arg = String::from(&args[i]);
+            if redirect_stdout.is_none() &&  (arg == ">" || arg == "1>") && args.len() > i + 1 {
+                redirect_stdout = Some(String::from(&args[i+1]));
+                skip_loop = true;
+            }
+            if redirect_stderr.is_none() && arg == "2>" && args.len() > i + 1 {
+                redirect_stderr = Some(String::from(&args[i+1]));
+                skip_loop = true;
+            }
+            if redirect_stderr.is_none() && redirect_stdout.is_none() {
+                filtered_args.push(arg);
+            }
+        }
+        let args = filtered_args;
+
+        let mut my_stdout = String::new();
+        let mut my_stderr = String::new();
+
         let history_command = String::from(input.trim());
         line_reader.insert_history_entry(&history_command, interactive);
 
+        // handle commands
         if command == "exit" {
             if args.len() > 1 {
                 error_code = i32::from_str_radix(&args[1], 10).unwrap();
@@ -313,7 +341,8 @@ fn main() {
             }
             break;
         } else if command == "echo" {
-            println!("{}", args[1..].join(" "));
+            my_stdout.push_str(&args[1..].join(" "));
+            my_stdout.push('\n');
         } else if command == "type" {
             if args.len() == 1 {
                 continue;
@@ -321,27 +350,26 @@ fn main() {
             let mut found_builtin = false;
             for builtin in builtins {
                 if builtin == args[1] {
-                    println!("{} is a shell builtin", args[1]);
+                    my_stdout.push_str(&format!("{} is a shell builtin\n", args[1]));
                     found_builtin = true;
                     break;
                 }
             }
-            if found_builtin {
-                continue;
-            }
-            let result = find_executable(&args[1]);
-            let found_executable = result.is_some();
-
-            if found_executable {
-                let executable_path = result.unwrap();
-                println!("{} is {}", args[1], executable_path);
-            }
-
-            if  !found_executable {
-                println!("{}: not found", args[1]);
+            if !found_builtin {
+                let result = find_executable(&args[1]);
+                let found_executable = result.is_some();
+    
+                if found_executable {
+                    let executable_path = result.unwrap();
+                    my_stdout.push_str(&format!("{} is {}\n", args[1], executable_path));
+                }
+    
+                if  !found_executable {
+                    my_stderr.push_str(&format!("{}: not found\n", args[1]));
+                }
             }
         } else if command == "pwd" {
-            println!("{}", current_dir.to_str().unwrap());
+            my_stdout.push_str(&format!("{}\n", current_dir.to_str().unwrap()));
         } else if command == "cd" {
             if args.len() == 1 {
                 continue;
@@ -369,12 +397,12 @@ fn main() {
                 if path_built.exists() {
                     current_dir = path_built;
                 } else {
-                    println!("cd: {}: No such file or directory", args[1]);
+                    my_stderr.push_str(&format!("cd: {}: No such file or directory\n", args[1]));
                 }
             } else if path.exists() {
                 current_dir = path;
             } else {
-                println!("cd: {}: No such file or directory", args[1]);
+                my_stderr.push_str(&format!("cd: {}: No such file or directory\n", args[1]));
             }
         } else if command == "history" {
             let history = line_reader.get_history();
@@ -420,7 +448,7 @@ fn main() {
                 }
             }
             for command_num in start..history.len() {
-                println!("    {}  {}", command_num + 1, history[command_num]);
+                my_stdout.push_str(&format!("    {}  {}\n", command_num + 1, history[command_num]));
             }
         } else { // executable commands
             let result = find_executable(&command);
@@ -435,10 +463,26 @@ fn main() {
                     let args_to_pass = args[1..].to_vec();
                     output = Command::new(executable_path).args(args_to_pass).output().unwrap();
                 }
-                print!("{}", String::from_utf8(output.stdout).unwrap());
+                my_stdout.push_str(&String::from_utf8(output.stdout).unwrap_or("".into()));
+                my_stderr.push_str(&String::from_utf8(output.stderr).unwrap_or("".into()));
             } else {
-                println!("{}: command not found", command);
+                my_stderr.push_str(&format!("{}: command not found\n", command));
             }
+        }
+        
+        if redirect_stdout.is_some() {
+            let stdout_file_path = PathBuf::from(redirect_stdout.unwrap());
+            let mut file = OpenOptions::new().create(true).write(true).open(stdout_file_path).unwrap();
+            file.write(my_stdout.as_bytes()).unwrap();
+        } else {
+            print!("{}", &my_stdout);
+        }
+        if redirect_stderr.is_some() {
+            let stderr_file_path = PathBuf::from(redirect_stderr.unwrap());
+            let mut file = OpenOptions::new().create(true).write(true).open(stderr_file_path).unwrap();
+            file.write(my_stderr.as_bytes()).unwrap();
+        } else {
+            eprint!("{}", &my_stderr);
         }
     }
     if error_code == 0 && hist_file.exists() {
