@@ -83,6 +83,14 @@ impl LineBuffer {
                 to_complete = String::from(builtin);
             }
         }
+        if potential == 0 {
+            let result = find_executable(&self.buf.iter().collect::<String>(), true);
+            if result.is_some() {
+                potential += 1;
+                let path = PathBuf::from(result.unwrap());
+                to_complete = String::from(path.file_name().unwrap().to_str().unwrap());
+            }
+        }
         if potential == 1 {
             to_complete.push(' ');
             self.buf = to_complete.chars().collect::<Vec<char>>();
@@ -181,7 +189,7 @@ impl LineBuffer {
     }
 }
 
-fn find_executable(executable_name: &str) -> Option<String> {
+fn find_executable(executable_name: &str, is_partial: bool) -> Option<String> {
     let path_var = env::var("PATH").unwrap();
     for dir_name in path_var.split(":") {
         let dir_path = PathBuf::from(dir_name);
@@ -190,6 +198,22 @@ fn find_executable(executable_name: &str) -> Option<String> {
         }
         let exec_path = dir_path.join(executable_name);
         if !exec_path.exists() {
+            if is_partial {
+                for entry in fs::read_dir(dir_path).unwrap() {
+                    let entry = entry.unwrap();
+                    let path = entry.path();
+                    if path.file_name().unwrap().to_str().unwrap().starts_with(executable_name) {
+                        let metadata = fs::metadata(&path).unwrap();
+                        let permissions = metadata.permissions();
+                        let mode = permissions.mode() as u16;
+                        let executable = 493u16;
+                        let is_executable = (mode & executable) == executable;
+                        if is_executable {
+                            return Some(String::from(path.to_str().unwrap()));
+                        }
+                    }
+                }
+            }
             continue;
         }
         let metadata = fs::metadata(&exec_path).unwrap();
@@ -399,7 +423,7 @@ fn main() {
                 }
             }
             if !found_builtin {
-                let result = find_executable(&args[1]);
+                let result = find_executable(&args[1], false);
                 let found_executable = result.is_some();
     
                 if found_executable {
@@ -494,7 +518,7 @@ fn main() {
                 my_stdout.push_str(&format!("    {}  {}\n", command_num + 1, history[command_num]));
             }
         } else { // executable commands
-            let result = find_executable(&command);
+            let result = find_executable(&command, false);
             let found_executable = result.is_some();
             if found_executable {
                 let executable_path = PathBuf::from(result.unwrap());
