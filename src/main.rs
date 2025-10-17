@@ -87,6 +87,9 @@ impl LineBuffer {
             to_complete.push(' ');
             self.buf = to_complete.chars().collect::<Vec<char>>();
             self.cursor = self.buf.len();
+        } else {
+            print!("\x07");
+            io::stdout().flush().unwrap();
         }
     }
 
