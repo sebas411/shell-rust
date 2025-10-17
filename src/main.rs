@@ -156,8 +156,13 @@ impl LineBuffer {
                     print!("\r\x1B[K{}", prompt);
                     print!("{}", self.to_str());
                     io::stdout().flush().unwrap();
+                } else if key == "\x09" { // tab
+                    print!("\r\x1B[K{}", prompt);
+                    print!("{}", self.to_str());
+                    io::stdout().flush().unwrap();
                 } else {
                     print!("{}", key);
+                    io::stdout().flush().unwrap();
                 }
             }
         }
