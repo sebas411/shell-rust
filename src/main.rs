@@ -14,11 +14,18 @@ struct LineBuffer {
     history: Vec<String>,
     history_cursor: usize,
     builtins: Vec<String>,
+    hints: Vec<String>,
+    in_tab_completion: bool,
 }
 
 impl LineBuffer {
     fn new() -> Self {
-        Self { buf: vec![], cursor: 0, history: vec![], history_cursor: 0, builtins: vec![] }
+        Self { buf: vec![], cursor: 0, history: vec![], history_cursor: 0, builtins: vec![], hints: vec![], in_tab_completion: false }
+    }
+
+    fn clear_hints(&mut self) {
+        self.hints = vec![];
+        self.in_tab_completion = false;
     }
 
     fn set_builtins(&mut self, builtins: &[&str]) {
@@ -75,30 +82,39 @@ impl LineBuffer {
     }
 
     fn tab_completion(&mut self) {
-        let mut potential = 0;
-        let mut to_complete = String::new();
+        let mut potential = vec![];
         for builtin in &self.builtins {
             if builtin.contains(&self.buf.iter().collect::<String>()) {
-                potential += 1;
-                to_complete = String::from(builtin);
+                potential.push(String::from(builtin));
             }
         }
-        if potential == 0 {
-            let result = find_executable(&self.buf.iter().collect::<String>(), true);
-            if result.is_some() {
-                potential += 1;
-                let path = PathBuf::from(result.unwrap());
-                to_complete = String::from(path.file_name().unwrap().to_str().unwrap());
+        if potential.len() == 0 {
+            let hints = find_executable_hints(&self.buf.iter().collect::<String>());
+            for hint in hints {
+                let path = PathBuf::from(hint);
+                potential.push(String::from(path.file_name().unwrap().to_str().unwrap()));
             }
         }
-        if potential == 1 {
+        potential.sort();
+        potential.dedup();
+        if potential.len() == 1 {
+            let mut to_complete = String::from(&potential[0]);
             to_complete.push(' ');
             self.buf = to_complete.chars().collect::<Vec<char>>();
             self.cursor = self.buf.len();
         } else {
             print!("\x07");
             io::stdout().flush().unwrap();
+            if potential.len() > 1 {
+                self.hints = potential;
+                self.in_tab_completion = true;
+            }
         }
+    }
+
+    fn tab_hints(&mut self) {
+        println!("\n\r\x1B[K{}", self.hints.join("  "));
+        self.clear_hints();
     }
 
     fn move_up_history(&mut self) {
@@ -137,6 +153,7 @@ impl LineBuffer {
     }
 
     fn read_line(&mut self, prompt: &str, interactive: bool) -> String {
+        self.clear_hints();
         if interactive {
             print!("\r\x1B[K{}", prompt);
         } else {
@@ -155,7 +172,13 @@ impl LineBuffer {
                 "up" => self.move_up_history(),
                 "down" => self.move_down_history(),
                 "\x7F" => self.delete_left(),
-                "\x09" => self.tab_completion(),
+                "\x09" => {
+                    if self.in_tab_completion {
+                        self.tab_hints();
+                    } else {
+                        self.tab_completion()
+                    }
+                },
                 "delete" => self.delete_right(),
                 s if s.len() == 1 => self.insert(s.chars().next().unwrap()),
                 _ => {}
@@ -176,6 +199,9 @@ impl LineBuffer {
                     io::stdout().flush().unwrap();
                 }
             }
+            if key != "\x09" {
+                self.clear_hints();
+            }
         }
 
         self.history_cursor = self.history.len();
@@ -189,7 +215,33 @@ impl LineBuffer {
     }
 }
 
-fn find_executable(executable_name: &str, is_partial: bool) -> Option<String> {
+fn find_executable_hints(executable_name: &str) -> Vec<String> {
+    let path_var = env::var("PATH").unwrap();
+    let mut hints_found = vec![];
+    for dir_name in path_var.split(":") {
+        let dir_path = PathBuf::from(dir_name);
+        if !dir_path.exists() {
+            continue;
+        }
+        for entry in fs::read_dir(dir_path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.file_name().unwrap().to_str().unwrap().starts_with(executable_name) {
+                let metadata = fs::metadata(&path).unwrap();
+                let permissions = metadata.permissions();
+                let mode = permissions.mode() as u16;
+                let executable = 493u16;
+                let is_executable = (mode & executable) == executable;
+                if is_executable {
+                    hints_found.push(String::from(path.to_str().unwrap()));
+                }
+            }
+        }
+    }
+    hints_found
+}
+
+fn find_executable(executable_name: &str) -> Option<String> {
     let path_var = env::var("PATH").unwrap();
     for dir_name in path_var.split(":") {
         let dir_path = PathBuf::from(dir_name);
@@ -198,22 +250,6 @@ fn find_executable(executable_name: &str, is_partial: bool) -> Option<String> {
         }
         let exec_path = dir_path.join(executable_name);
         if !exec_path.exists() {
-            if is_partial {
-                for entry in fs::read_dir(dir_path).unwrap() {
-                    let entry = entry.unwrap();
-                    let path = entry.path();
-                    if path.file_name().unwrap().to_str().unwrap().starts_with(executable_name) {
-                        let metadata = fs::metadata(&path).unwrap();
-                        let permissions = metadata.permissions();
-                        let mode = permissions.mode() as u16;
-                        let executable = 493u16;
-                        let is_executable = (mode & executable) == executable;
-                        if is_executable {
-                            return Some(String::from(path.to_str().unwrap()));
-                        }
-                    }
-                }
-            }
             continue;
         }
         let metadata = fs::metadata(&exec_path).unwrap();
@@ -320,7 +356,9 @@ fn split_args(input: &str) -> Vec<String> {
         in_whitespace = false;
         last_backslash = false;
     }
-    args.push(current_arg);
+    if current_arg != "" {
+        args.push(current_arg);
+    }
     args
 }
 
@@ -423,7 +461,7 @@ fn main() {
                 }
             }
             if !found_builtin {
-                let result = find_executable(&args[1], false);
+                let result = find_executable(&args[1]);
                 let found_executable = result.is_some();
     
                 if found_executable {
@@ -518,7 +556,7 @@ fn main() {
                 my_stdout.push_str(&format!("    {}  {}\n", command_num + 1, history[command_num]));
             }
         } else { // executable commands
-            let result = find_executable(&command, false);
+            let result = find_executable(&command);
             let found_executable = result.is_some();
             if found_executable {
                 let executable_path = PathBuf::from(result.unwrap());
