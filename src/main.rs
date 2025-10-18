@@ -100,12 +100,17 @@ impl LineBuffer {
         if potential.len() == 1 {
             let mut to_complete = String::from(&potential[0]);
             to_complete.push(' ');
-            self.buf = to_complete.chars().collect::<Vec<char>>();
+            self.buf = to_complete.chars().collect();
             self.cursor = self.buf.len();
         } else {
             print!("\x07");
             io::stdout().flush().unwrap();
             if potential.len() > 1 {
+                let common_prefix = find_common_prefix(&potential);
+                if common_prefix != self.buf.iter().collect::<String>() {
+                    self.buf = common_prefix.chars().collect();
+                    self.cursor = self.buf.len();
+                }
                 self.hints = potential;
                 self.in_tab_completion = true;
             }
@@ -212,6 +217,30 @@ impl LineBuffer {
 
     fn to_str(&self) -> String {
         self.buf.iter().collect::<String>()
+    }
+}
+
+fn find_common_prefix(hints: &Vec<String>) -> String {
+    if hints.len() == 0 {
+        "".into()
+    } else if hints.len() == 1 {
+        hints[0].clone()
+    } else {
+        let mut common_prefix = String::from(&hints[0]);
+        for hint in hints[1..].iter() {
+            if !hint.contains(&common_prefix) {
+                let mut new_common_prefix = String::new();
+                for (c1, c2) in hint.chars().zip(common_prefix.chars()) {
+                    if c1 == c2 {
+                        new_common_prefix.push(c1);
+                    } else {
+                        break;
+                    }
+                }
+                common_prefix = new_common_prefix;
+            }
+        }
+        common_prefix.into()
     }
 }
 
