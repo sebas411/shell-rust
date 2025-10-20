@@ -1,10 +1,10 @@
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write, Read};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::process::{self, Command};
+use std::process::{self, ChildStdout, Command, Stdio};
 use crossterm::terminal::{enable_raw_mode, disable_raw_mode};
 use atty::Stream;
 
@@ -402,6 +402,10 @@ fn main() {
     let mut history_appended = 0;
     let hist_file = env::var("HISTFILE").unwrap_or(String::from("~/.ssh_history"));
     let mut entries_read = 0;
+    let mut passed_stdin: Option<ChildStdout> = None;
+    let mut is_piped_in;
+    let mut passed_args = vec![];
+    let mut child_processes = vec![];
 
     line_reader.set_builtins(&builtins);
 
@@ -419,14 +423,22 @@ fn main() {
     }
 
     loop {
-        // Wait for user input
-        input = line_reader.read_line("$ ", interactive);
+        let args;
         let mut redirect_stdout = None;
         let mut redirect_stderr = None;
         let mut appending_stdout = false;
         let mut appending_stderr = false;
 
-        let args = split_args(&input);
+        if passed_args.len() > 0 {
+            input = String::new();
+            args = passed_args;
+            is_piped_in = true;
+            passed_args = vec![];
+        } else {
+            input = line_reader.read_line("$ ", interactive);
+            args = split_args(&input);
+            is_piped_in = false;
+        }
         if args.len() == 0 {
             continue;
         }
@@ -435,11 +447,20 @@ fn main() {
         let mut filtered_args = vec![];
 
         let mut skip_loop = false;
+        let mut start_passing_args = false;
         for i in 0..args.len() {
             if skip_loop {
                 continue;
             }
             let arg = String::from(&args[i]);
+            if start_passing_args {
+                passed_args.push(arg);
+                continue;
+            }
+            if arg == "|" {
+                start_passing_args = true;
+                continue;
+            }
             if redirect_stdout.is_none() &&  (arg == ">" || arg == "1>" || arg == ">>" || arg == "1>>") && args.len() > i + 1 {
                 redirect_stdout = Some(String::from(&args[i+1]));
                 if arg == ">>" || arg == "1>>" {
@@ -454,7 +475,7 @@ fn main() {
                     appending_stderr = true;
                 }
             }
-            if redirect_stderr.is_none() && redirect_stdout.is_none() {
+            if redirect_stderr.is_none() && redirect_stdout.is_none() && !start_passing_args {
                 filtered_args.push(arg);
             }
         }
@@ -463,8 +484,10 @@ fn main() {
         let mut my_stdout = String::new();
         let mut my_stderr = String::new();
 
-        let history_command = String::from(input.trim());
-        line_reader.insert_history_entry(&history_command, interactive);
+        if !is_piped_in {
+            let history_command = String::from(input.trim());
+            line_reader.insert_history_entry(&history_command, interactive);
+        }
 
         // handle commands
         if command == "exit" {
@@ -590,36 +613,74 @@ fn main() {
             if found_executable {
                 let executable_path = PathBuf::from(result.unwrap());
                 let executable_path = executable_path.file_name().unwrap();
-                let output;
+                let mut program;
+                let stdin_config;
+                let stdout_config;
+                let stderr_config;
+                // configure stdin
+                if is_piped_in {
+                    stdin_config = Stdio::from(passed_stdin.unwrap());
+                    passed_stdin = None;
+                } else {
+                    stdin_config = Stdio::inherit();
+                }
+                // configure stdout and stderr
+                if passed_args.is_empty() && !redirect_stdout.is_some() && !redirect_stderr.is_some() {
+                    stdout_config = Stdio::inherit();
+                    stderr_config = Stdio::inherit();
+                } else {
+                    stdout_config = Stdio::piped();
+                    stderr_config = Stdio::piped();
+                }
+                // start processes
                 if args.len() == 1 {
-                    output = Command::new(executable_path).output().unwrap();
+                    program = Command::new(executable_path).current_dir(&current_dir).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
                 } else {
                     let args_to_pass = args[1..].to_vec();
-                    output = Command::new(executable_path).args(args_to_pass).output().unwrap();
+                    program = Command::new(executable_path).current_dir(&current_dir).args(args_to_pass).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
                 }
-                my_stdout.push_str(&String::from_utf8(output.stdout).unwrap_or("".into()));
-                my_stderr.push_str(&String::from_utf8(output.stderr).unwrap_or("".into()));
+                // handle stdout based on pipeline position
+                if passed_args.len() > 0 {
+                    let child_stdout = program.stdout.take();
+                    passed_stdin = child_stdout;
+                    child_processes.push(program);
+                } else {
+                    if redirect_stdout.is_some() || redirect_stderr.is_some() {
+                        let output = program.wait_with_output().unwrap();
+                        my_stdout.push_str(&String::from_utf8(output.stdout).unwrap_or("".into()));
+                        my_stderr.push_str(&String::from_utf8(output.stderr).unwrap_or("".into()));
+                    } else {
+                        program.wait().unwrap();
+                    }
+                    // close all processes
+                    for _ in 0..child_processes.len() {
+                        let mut child = child_processes.pop().unwrap();
+                        child.kill().unwrap();
+                    }
+                }
             } else {
                 my_stderr.push_str(&format!("{}: command not found\n", command));
             }
         }
         
-        if redirect_stdout.is_some() {
+        if passed_args.len() > 0 {
+        } else if redirect_stdout.is_some() {
             let stdout_file_path = PathBuf::from(redirect_stdout.unwrap());
-            let mut file = OpenOptions::new().create(true).write(true).append(appending_stdout).open(stdout_file_path).unwrap();
+            let mut file = OpenOptions::new().create(true).write(true).append(appending_stdout).truncate(!appending_stdout).open(stdout_file_path).unwrap();
             file.write(my_stdout.as_bytes()).unwrap();
         } else {
             print!("{}", &my_stdout);
         }
         if redirect_stderr.is_some() {
             let stderr_file_path = PathBuf::from(redirect_stderr.unwrap());
-            let mut file = OpenOptions::new().create(true).write(true).append(appending_stderr).open(stderr_file_path).unwrap();
+            let mut file = OpenOptions::new().create(true).write(true).append(appending_stderr).truncate(!appending_stderr).open(stderr_file_path).unwrap();
             file.write(my_stderr.as_bytes()).unwrap();
         } else {
             eprint!("{}", &my_stderr);
         }
     }
-    if error_code == 0 && hist_file.exists() {
+    let hist_dir = hist_file.parent();
+    if error_code == 0 && (hist_dir.is_none() || hist_dir.unwrap().exists()) {
         let mut file = OpenOptions::new().create(true).append(true).open(hist_file).unwrap();
         let history = line_reader.get_history();
         for entry in &history[entries_read..] {
