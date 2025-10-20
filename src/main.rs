@@ -403,6 +403,7 @@ fn main() {
     let hist_file = env::var("HISTFILE").unwrap_or(String::from("~/.ssh_history"));
     let mut entries_read = 0;
     let mut passed_stdin: Option<ChildStdout> = None;
+    let mut passed_stdin_builtin = String::new();
     let mut is_piped_in;
     let mut passed_args = vec![];
     let mut child_processes = vec![];
@@ -617,10 +618,14 @@ fn main() {
                 let stdin_config;
                 let stdout_config;
                 let stderr_config;
+                let mut last_builtin = false;
                 // configure stdin
-                if is_piped_in {
+                if is_piped_in && passed_stdin.is_some() {
                     stdin_config = Stdio::from(passed_stdin.unwrap());
                     passed_stdin = None;
+                } else if is_piped_in && passed_stdin.is_none() {
+                    stdin_config = Stdio::piped(); 
+                    last_builtin = true;
                 } else {
                     stdin_config = Stdio::inherit();
                 }
@@ -638,6 +643,12 @@ fn main() {
                 } else {
                     let args_to_pass = args[1..].to_vec();
                     program = Command::new(executable_path).current_dir(&current_dir).args(args_to_pass).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
+                }
+                // handle builtins stdin
+                if is_piped_in && last_builtin {
+                    let process_stdin = program.stdin.as_mut().unwrap();
+                    process_stdin.write_all(passed_stdin_builtin.as_bytes()).unwrap();
+                    passed_stdin_builtin = "".into();
                 }
                 // handle stdout based on pipeline position
                 if passed_args.len() > 0 {
@@ -663,6 +674,12 @@ fn main() {
             }
         }
         
+        // process stdout of builtins
+        if passed_args.len() > 0 && builtins.contains(&command.as_str()) {
+            passed_stdin_builtin = my_stdout;
+            my_stdout = "".into();
+        }
+
         if passed_args.len() > 0 {
         } else if redirect_stdout.is_some() {
             let stdout_file_path = PathBuf::from(redirect_stdout.unwrap());
