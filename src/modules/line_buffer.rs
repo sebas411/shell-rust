@@ -77,6 +77,18 @@ pub fn find_executable(executable_name: &str) -> Option<String> {
     return None;
 }
 
+fn find_file(filename: &str) -> Option<String> {
+    let current_dir = env::current_dir().unwrap();
+
+    for entry in fs::read_dir(current_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().into_string().unwrap().starts_with(filename) {
+            return Some(entry.file_name().into_string().unwrap())
+        }
+    }
+    None
+}
+
 pub struct LineBuffer {
     buf: Vec<char>,
     cursor: usize,
@@ -151,37 +163,49 @@ impl LineBuffer {
     }
 
     fn tab_completion(&mut self) {
-        let mut potential = vec![];
-        for builtin in &self.builtins {
-            if builtin.contains(&self.buf.iter().collect::<String>()) {
-                potential.push(String::from(builtin));
+        let current_string = self.buf.iter().collect::<String>();
+
+        // filename completion
+        if let Some((pre, post)) = current_string.rsplit_once(' ') && !pre.ends_with('\\') {
+            let current_string = post;
+            if let Some(complete) = find_file(current_string) {
+                let to_complete = format!("{} {} ", pre, complete);
+                self.buf = to_complete.chars().collect();
+                self.cursor = self.buf.len();
             }
-        }
-        if potential.len() == 0 {
-            let hints = find_executable_hints(&self.buf.iter().collect::<String>());
-            for hint in hints {
-                let path = PathBuf::from(hint);
-                potential.push(String::from(path.file_name().unwrap().to_str().unwrap()));
-            }
-        }
-        potential.sort();
-        potential.dedup();
-        if potential.len() == 1 {
-            let mut to_complete = String::from(&potential[0]);
-            to_complete.push(' ');
-            self.buf = to_complete.chars().collect();
-            self.cursor = self.buf.len();
-        } else {
-            print!("\x07");
-            io::stdout().flush().unwrap();
-            if potential.len() > 1 {
-                let common_prefix = find_common_prefix(&potential);
-                if common_prefix != self.buf.iter().collect::<String>() {
-                    self.buf = common_prefix.chars().collect();
-                    self.cursor = self.buf.len();
+        } else { // command completion
+            let mut potential = vec![];
+            for builtin in &self.builtins {
+                if builtin.contains(&self.buf.iter().collect::<String>()) {
+                    potential.push(String::from(builtin));
                 }
-                self.hints = potential;
-                self.in_tab_completion = true;
+            }
+            if potential.len() == 0 {
+                let hints = find_executable_hints(&current_string);
+                for hint in hints {
+                    let path = PathBuf::from(hint);
+                    potential.push(String::from(path.file_name().unwrap().to_str().unwrap()));
+                }
+            }
+            potential.sort();
+            potential.dedup();
+            if potential.len() == 1 {
+                let mut to_complete = String::from(&potential[0]);
+                to_complete.push(' ');
+                self.buf = to_complete.chars().collect();
+                self.cursor = self.buf.len();
+            } else {
+                print!("\x07");
+                io::stdout().flush().unwrap();
+                if potential.len() > 1 {
+                    let common_prefix = find_common_prefix(&potential);
+                    if common_prefix != self.buf.iter().collect::<String>() {
+                        self.buf = common_prefix.chars().collect();
+                        self.cursor = self.buf.len();
+                    }
+                    self.hints = potential;
+                    self.in_tab_completion = true;
+                }
             }
         }
     }
