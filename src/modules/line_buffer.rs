@@ -174,11 +174,16 @@ impl LineBuffer {
                 added_dir = current_dir.to_string();
                 current_string = current_filepath;
             }
-            if let Some(complete) = find_file(&added_dir, current_string) {
+            if let Some(mut completed_path) = find_file(&added_dir, current_string) {
                 if !added_dir.is_empty() {
-                    added_dir.push('/');
+                    completed_path = format!("{}/{}", added_dir, completed_path);
                 }
-                let to_complete = format!("{} {}{} ", pre, added_dir, complete);
+                let to_complete;
+                if PathBuf::from(completed_path.clone()).is_dir() {
+                    to_complete = format!("{} {}/", pre, completed_path);
+                } else {
+                    to_complete = format!("{} {} ", pre, completed_path);
+                }
                 self.buf = to_complete.chars().collect();
                 self.cursor = self.buf.len();
             }
