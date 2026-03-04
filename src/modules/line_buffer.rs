@@ -77,17 +77,18 @@ pub fn find_executable(executable_name: &str) -> Option<String> {
     return None;
 }
 
-fn find_file(dirname: &str, filename: &str) -> Option<String> {
+fn find_file(dirname: &str, filename: &str) -> Vec<String> {
     let current_dir = env::current_dir().unwrap();
     let search_dir = current_dir.join(dirname);
+    let mut files = vec![];
 
     for entry in fs::read_dir(search_dir).unwrap() {
         let entry = entry.unwrap();
         if entry.file_name().into_string().unwrap().starts_with(filename) {
-            return Some(entry.file_name().into_string().unwrap())
+            files.push(entry.file_name().into_string().unwrap());
         }
     }
-    None
+    files
 }
 
 pub struct LineBuffer {
@@ -174,7 +175,9 @@ impl LineBuffer {
                 added_dir = current_dir.to_string();
                 current_string = current_filepath;
             }
-            if let Some(mut completed_path) = find_file(&added_dir, current_string) {
+            let potential = find_file(&added_dir, current_string);
+            if potential.len() == 1 {
+                let mut completed_path = potential[0].clone();
                 if !added_dir.is_empty() {
                     completed_path = format!("{}/{}", added_dir, completed_path);
                 }
@@ -189,6 +192,27 @@ impl LineBuffer {
             } else {
                 print!("\x07");
                 io::stdout().flush().unwrap();
+                if potential.len() > 1 {
+                    let mut hints = vec![];
+                    for entry in potential {
+                        let mut full_entry = entry;
+                        if !added_dir.is_empty() {
+                            full_entry = format!("{}/{}", added_dir, full_entry);
+                        }
+                        if PathBuf::from(&full_entry).is_dir() {
+                            full_entry.push('/');
+                        }
+                        hints.push(full_entry);
+                    }
+                    // let common_prefix = find_common_prefix(&potential);
+                    // if common_prefix != self.buf.iter().collect::<String>() {
+                    //     self.buf = common_prefix.chars().collect();
+                    //     self.cursor = self.buf.len();
+                    // }
+                    hints.sort();
+                    self.hints = hints;
+                    self.in_tab_completion = true;
+                }
             }
         } else { // command completion
             let mut potential = vec![];
