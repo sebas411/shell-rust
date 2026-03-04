@@ -186,6 +186,9 @@ impl LineBuffer {
                 }
                 self.buf = to_complete.chars().collect();
                 self.cursor = self.buf.len();
+            } else {
+                print!("\x07");
+                io::stdout().flush().unwrap();
             }
         } else { // command completion
             let mut potential = vec![];
