@@ -77,10 +77,11 @@ pub fn find_executable(executable_name: &str) -> Option<String> {
     return None;
 }
 
-fn find_file(filename: &str) -> Option<String> {
+fn find_file(dirname: &str, filename: &str) -> Option<String> {
     let current_dir = env::current_dir().unwrap();
+    let search_dir = current_dir.join(dirname);
 
-    for entry in fs::read_dir(current_dir).unwrap() {
+    for entry in fs::read_dir(search_dir).unwrap() {
         let entry = entry.unwrap();
         if entry.file_name().into_string().unwrap().starts_with(filename) {
             return Some(entry.file_name().into_string().unwrap())
@@ -167,9 +168,17 @@ impl LineBuffer {
 
         // filename completion
         if let Some((pre, post)) = current_string.rsplit_once(' ') && !pre.ends_with('\\') {
-            let current_string = post;
-            if let Some(complete) = find_file(current_string) {
-                let to_complete = format!("{} {} ", pre, complete);
+            let mut current_string = post;
+            let mut added_dir = String::new();
+            if let Some((current_dir, current_filepath)) = current_string.rsplit_once('/') {
+                added_dir = current_dir.to_string();
+                current_string = current_filepath;
+            }
+            if let Some(complete) = find_file(&added_dir, current_string) {
+                if !added_dir.is_empty() {
+                    added_dir.push('/');
+                }
+                let to_complete = format!("{} {}{} ", pre, added_dir, complete);
                 self.buf = to_complete.chars().collect();
                 self.cursor = self.buf.len();
             }
