@@ -204,11 +204,12 @@ impl LineBuffer {
                         }
                         hints.push(full_entry);
                     }
-                    // let common_prefix = find_common_prefix(&potential);
-                    // if common_prefix != self.buf.iter().collect::<String>() {
-                    //     self.buf = common_prefix.chars().collect();
-                    //     self.cursor = self.buf.len();
-                    // }
+                    let common_prefix = find_common_prefix(&hints);
+                    let full_command_line = format!("{} {}", pre, common_prefix);
+                    if full_command_line != self.buf.iter().collect::<String>() {
+                        self.buf = full_command_line.chars().collect();
+                        self.cursor = self.buf.len();
+                    }
                     hints.sort();
                     self.hints = hints;
                     self.in_tab_completion = true;
