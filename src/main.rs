@@ -118,7 +118,7 @@ fn main() {
     let mut line_reader = LineBuffer::new();
     let mut input;
     let error_code;
-    let builtins = ["echo", "exit", "type", "pwd", "cd", "history"];
+    let builtins = ["echo", "exit", "type", "pwd", "cd", "history", "jobs"];
     let mut current_dir = env::current_dir().unwrap();
     let mut history_appended = 0;
     let hist_file = env::var("HISTFILE").unwrap_or(String::from("~/.sebash_history"));
@@ -212,186 +212,197 @@ fn main() {
         }
 
         // handle commands
-        if command == "exit" {
-            if args.len() > 1 {
-                error_code = i32::from_str_radix(&args[1], 10).unwrap_or(0);
-            } else {
-                error_code = 0;
-            }
-            break;
-        } else if command == "echo" {
-            my_stdout.push_str(&args[1..].join(" "));
-            my_stdout.push('\n');
-        } else if command == "type" {
-            if args.len() == 1 {
-                continue;
-            }
-            let mut found_builtin = false;
-            for builtin in builtins {
-                if builtin == args[1] {
-                    my_stdout.push_str(&format!("{} is a shell builtin\n", args[1]));
-                    found_builtin = true;
-                    break;
+        match command.as_str() {
+            "exit" => {
+                if args.len() > 1 {
+                    error_code = i32::from_str_radix(&args[1], 10).unwrap_or(0);
+                } else {
+                    error_code = 0;
                 }
+                break;
             }
-            if !found_builtin {
-                let result = find_executable(&args[1]);
-                let found_executable = result.is_some();
-    
-                if found_executable {
-                    let executable_path = result.unwrap();
-                    my_stdout.push_str(&format!("{} is {}\n", args[1], executable_path));
+            "echo" => {
+                my_stdout.push_str(&args[1..].join(" "));
+                my_stdout.push('\n');
+            }
+            "type" => {
+                if args.len() == 1 {
+                    continue;
                 }
-    
-                if  !found_executable {
-                    my_stderr.push_str(&format!("{}: not found\n", args[1]));
-                }
-            }
-        } else if command == "pwd" {
-            my_stdout.push_str(&format!("{}\n", current_dir.to_str().unwrap()));
-        } else if command == "cd" {
-            if args.len() == 1 {
-                continue;
-            }
-            let mut path = PathBuf::from(&args[1]);
-            if path.iter().nth(0).unwrap() == "~" {
-                let old_path = path.clone();
-                path = PathBuf::from(env::var("HOME").unwrap());
-                let sub_dir_vec: Vec<&OsStr> = old_path.iter().skip(1).collect();
-                for d in sub_dir_vec {
-                    path = path.join(d);
-                }
-            }
-            if path.is_relative() {
-                let mut path_built: PathBuf = current_dir.clone();
-                for part in path.iter() {
-                    if part == "." {
-                        path_built = current_dir.clone();
-                    } else if part == ".." {
-                        path_built.pop();
-                    } else {
-                        path_built = path_built.join(part);
+                let mut found_builtin = false;
+                for builtin in builtins {
+                    if builtin == args[1] {
+                        my_stdout.push_str(&format!("{} is a shell builtin\n", args[1]));
+                        found_builtin = true;
+                        break;
                     }
                 }
-                if path_built.exists() {
-                    current_dir = path_built;
+                if !found_builtin {
+                    let result = find_executable(&args[1]);
+                    let found_executable = result.is_some();
+        
+                    if found_executable {
+                        let executable_path = result.unwrap();
+                        my_stdout.push_str(&format!("{} is {}\n", args[1], executable_path));
+                    }
+        
+                    if  !found_executable {
+                        my_stderr.push_str(&format!("{}: not found\n", args[1]));
+                    }
+                }
+            }
+            "pwd" => {
+                my_stdout.push_str(&format!("{}\n", current_dir.to_str().unwrap()));
+            }
+            "cd" => {
+                if args.len() == 1 {
+                    continue;
+                }
+                let mut path = PathBuf::from(&args[1]);
+                if path.iter().nth(0).unwrap() == "~" {
+                    let old_path = path.clone();
+                    path = PathBuf::from(env::var("HOME").unwrap());
+                    let sub_dir_vec: Vec<&OsStr> = old_path.iter().skip(1).collect();
+                    for d in sub_dir_vec {
+                        path = path.join(d);
+                    }
+                }
+                if path.is_relative() {
+                    let mut path_built: PathBuf = current_dir.clone();
+                    for part in path.iter() {
+                        if part == "." {
+                            path_built = current_dir.clone();
+                        } else if part == ".." {
+                            path_built.pop();
+                        } else {
+                            path_built = path_built.join(part);
+                        }
+                    }
+                    if path_built.exists() {
+                        current_dir = path_built;
+                    } else {
+                        my_stderr.push_str(&format!("cd: {}: No such file or directory\n", args[1]));
+                    }
+                } else if path.exists() {
+                    current_dir = path;
                 } else {
                     my_stderr.push_str(&format!("cd: {}: No such file or directory\n", args[1]));
                 }
-            } else if path.exists() {
-                current_dir = path;
-            } else {
-                my_stderr.push_str(&format!("cd: {}: No such file or directory\n", args[1]));
             }
-        } else if command == "history" {
-            let history = line_reader.get_history();
-            let mut start = 0;
-            if args.len() > 1 {
-                let result = usize::from_str_radix(&args[1], 10);
-                if result.is_ok() {
-                    start = history.len() - result.unwrap();
-                } else {
-                    let args = args[1..].to_vec();
-                    if args.len() == 2 {
-                        // read
-                        if args[0] == "-r" {
-                            let file_path = PathBuf::from(&args[1]);
-                            if file_path.exists() {
-                                let file_contents = fs::read_to_string(file_path).unwrap();
-                                for file_line in file_contents.split('\n') {
-                                    if file_line != "" {
-                                        line_reader.insert_history_entry(file_line, interactive);
+            "history" => {
+                let history = line_reader.get_history();
+                let mut start = 0;
+                if args.len() > 1 {
+                    let result = usize::from_str_radix(&args[1], 10);
+                    if result.is_ok() {
+                        start = history.len() - result.unwrap();
+                    } else {
+                        let args = args[1..].to_vec();
+                        if args.len() == 2 {
+                            // read
+                            if args[0] == "-r" {
+                                let file_path = PathBuf::from(&args[1]);
+                                if file_path.exists() {
+                                    let file_contents = fs::read_to_string(file_path).unwrap();
+                                    for file_line in file_contents.split('\n') {
+                                        if file_line != "" {
+                                            line_reader.insert_history_entry(file_line, interactive);
+                                        }
                                     }
                                 }
                             }
-                        }
-                        // write
-                        else if args[0] == "-w" {
-                            let file_path = PathBuf::from(&args[1]);
-                            let mut file = OpenOptions::new().create(true).write(true).open(file_path).unwrap();
-                            for entry in history {
-                                file.write_fmt(format_args!("{}\n", entry)).unwrap();
+                            // write
+                            else if args[0] == "-w" {
+                                let file_path = PathBuf::from(&args[1]);
+                                let mut file = OpenOptions::new().create(true).write(true).open(file_path).unwrap();
+                                for entry in history {
+                                    file.write_fmt(format_args!("{}\n", entry)).unwrap();
+                                }
+                            }
+                            // append
+                            else if args[0] == "-a" {
+                                let file_path = PathBuf::from(&args[1]);
+                                let mut file = OpenOptions::new().create(false).append(true).open(file_path).unwrap();
+                                for entry in &history[history_appended..] {
+                                    file.write_fmt(format_args!("{}\n", entry)).unwrap();
+                                    history_appended += 1;
+                                }
                             }
                         }
-                        // append
-                        else if args[0] == "-a" {
-                            let file_path = PathBuf::from(&args[1]);
-                            let mut file = OpenOptions::new().create(false).append(true).open(file_path).unwrap();
-                            for entry in &history[history_appended..] {
-                                file.write_fmt(format_args!("{}\n", entry)).unwrap();
-                                history_appended += 1;
-                            }
-                        }
+                        continue;
                     }
-                    continue;
+                }
+                for command_num in start..history.len() {
+                    my_stdout.push_str(&format!("    {}  {}\n", command_num + 1, history[command_num]));
                 }
             }
-            for command_num in start..history.len() {
-                my_stdout.push_str(&format!("    {}  {}\n", command_num + 1, history[command_num]));
+            "jobs" => {
+                
             }
-        } else { // executable commands
-            let result = find_executable(&command);
-            let found_executable = result.is_some();
-            if found_executable {
-                let executable_path = PathBuf::from(result.unwrap());
-                let executable_path = executable_path.file_name().unwrap();
-                let mut program;
-                let stdin_config;
-                let stdout_config;
-                let stderr_config;
-                let mut last_builtin = false;
-                // configure stdin
-                if is_piped_in && passed_stdin.is_some() {
-                    stdin_config = Stdio::from(passed_stdin.unwrap());
-                    passed_stdin = None;
-                } else if is_piped_in && passed_stdin.is_none() {
-                    stdin_config = Stdio::piped(); 
-                    last_builtin = true;
-                } else {
-                    stdin_config = Stdio::inherit();
-                }
-                // configure stdout and stderr
-                if passed_args.is_empty() && !redirect_stdout.is_some() && !redirect_stderr.is_some() {
-                    stdout_config = Stdio::inherit();
-                    stderr_config = Stdio::inherit();
-                } else {
-                    stdout_config = Stdio::piped();
-                    stderr_config = Stdio::piped();
-                }
-                // start processes
-                if args.len() == 1 {
-                    program = Command::new(executable_path).current_dir(&current_dir).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
-                } else {
-                    let args_to_pass = args[1..].to_vec();
-                    program = Command::new(executable_path).current_dir(&current_dir).args(args_to_pass).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
-                }
-                // handle builtins stdin
-                if is_piped_in && last_builtin {
-                    let process_stdin = program.stdin.as_mut().unwrap();
-                    process_stdin.write_all(passed_stdin_builtin.as_bytes()).unwrap();
-                    passed_stdin_builtin = "".into();
-                }
-                // handle stdout based on pipeline position
-                if passed_args.len() > 0 {
-                    let child_stdout = program.stdout.take();
-                    passed_stdin = child_stdout;
-                    child_processes.push(program);
-                } else {
-                    if redirect_stdout.is_some() || redirect_stderr.is_some() {
-                        let output = program.wait_with_output().unwrap();
-                        my_stdout.push_str(&String::from_utf8(output.stdout).unwrap_or("".into()));
-                        my_stderr.push_str(&String::from_utf8(output.stderr).unwrap_or("".into()));
+            _ => {
+                let result = find_executable(&command);
+                let found_executable = result.is_some();
+                if found_executable {
+                    let executable_path = PathBuf::from(result.unwrap());
+                    let executable_path = executable_path.file_name().unwrap();
+                    let mut program;
+                    let stdin_config;
+                    let stdout_config;
+                    let stderr_config;
+                    let mut last_builtin = false;
+                    // configure stdin
+                    if is_piped_in && passed_stdin.is_some() {
+                        stdin_config = Stdio::from(passed_stdin.unwrap());
+                        passed_stdin = None;
+                    } else if is_piped_in && passed_stdin.is_none() {
+                        stdin_config = Stdio::piped(); 
+                        last_builtin = true;
                     } else {
-                        program.wait().unwrap();
+                        stdin_config = Stdio::inherit();
                     }
-                    // close all processes
-                    for _ in 0..child_processes.len() {
-                        let mut child = child_processes.pop().unwrap();
-                        child.kill().unwrap();
+                    // configure stdout and stderr
+                    if passed_args.is_empty() && !redirect_stdout.is_some() && !redirect_stderr.is_some() {
+                        stdout_config = Stdio::inherit();
+                        stderr_config = Stdio::inherit();
+                    } else {
+                        stdout_config = Stdio::piped();
+                        stderr_config = Stdio::piped();
                     }
+                    // start processes
+                    if args.len() == 1 {
+                        program = Command::new(executable_path).current_dir(&current_dir).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
+                    } else {
+                        let args_to_pass = args[1..].to_vec();
+                        program = Command::new(executable_path).current_dir(&current_dir).args(args_to_pass).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
+                    }
+                    // handle builtins stdin
+                    if is_piped_in && last_builtin {
+                        let process_stdin = program.stdin.as_mut().unwrap();
+                        process_stdin.write_all(passed_stdin_builtin.as_bytes()).unwrap();
+                        passed_stdin_builtin = "".into();
+                    }
+                    // handle stdout based on pipeline position
+                    if passed_args.len() > 0 {
+                        let child_stdout = program.stdout.take();
+                        passed_stdin = child_stdout;
+                        child_processes.push(program);
+                    } else {
+                        if redirect_stdout.is_some() || redirect_stderr.is_some() {
+                            let output = program.wait_with_output().unwrap();
+                            my_stdout.push_str(&String::from_utf8(output.stdout).unwrap_or("".into()));
+                            my_stderr.push_str(&String::from_utf8(output.stderr).unwrap_or("".into()));
+                        } else {
+                            program.wait().unwrap();
+                        }
+                        // close all processes
+                        for _ in 0..child_processes.len() {
+                            let mut child = child_processes.pop().unwrap();
+                            child.kill().unwrap();
+                        }
+                    }
+                } else {
+                    my_stderr.push_str(&format!("{}: command not found\n", command));
                 }
-            } else {
-                my_stderr.push_str(&format!("{}: command not found\n", command));
             }
         }
         
