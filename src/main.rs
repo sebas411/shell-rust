@@ -4,77 +4,83 @@ use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{self, ChildStdout, Command, Stdio};
+use std::process::{self, Child, ChildStdout, Command, Stdio};
+use std::rc::Rc;
+use std::sync::RwLock;
 use atty::Stream;
 
 use crate::modules::line_buffer::{LineBuffer, find_executable};
 mod modules;
 
 struct BgJobList {
-    jobs: HashMap<usize, BackgroundJob>,
+    jobs: HashMap<usize, Rc<RwLock<BackgroundJob>>>,
+    jobs_ages: Vec<usize>,
     current_job: usize,
-    latest_job: usize,
-    second_latest_job: usize,
 }
 
 impl BgJobList {
     fn new() -> Self {
-        Self { jobs: HashMap::new(), current_job: 0, latest_job: 0, second_latest_job: 0 }
+        Self { jobs: HashMap::new(), current_job: 0, jobs_ages: Vec::new() }
     }
-    fn insert_job(&mut self, mut job: BackgroundJob) -> usize {
+    fn insert_job(&mut self, job: BackgroundJob) -> usize {
         self.current_job += 1;
         let internal_id = self.current_job;
-        if let Some(second) = self.jobs.get_mut(&self.second_latest_job) {
-            second.set_age(JobAge::Old);
-        }
-        if let Some(latest) = self.jobs.get_mut(&self.latest_job) {
-            latest.set_age(JobAge::Second);
-            self.second_latest_job = self.latest_job;
-        }
-        job.set_age(JobAge::Latest);
-        self.latest_job = internal_id;
-        self.jobs.insert(internal_id, job);
+        self.jobs_ages.push(internal_id);
+        self.jobs.insert(internal_id, Rc::new(RwLock::new(job)));
         internal_id
+    }
+    fn get_recent(&self) -> (usize, usize) { // (latest, second)
+        let jobs_len = self.jobs_ages.len();
+        if jobs_len >= 2 {
+            (self.jobs_ages[jobs_len-1], self.jobs_ages[jobs_len-2])
+        } else if jobs_len == 1 {
+            (self.jobs_ages[0], 0)
+        } else {
+            (0, 0)
+        }
+    }
+    fn reap(&mut self) {
+        let mut to_remove = vec![];
+        for (i_id, job) in &self.jobs {
+            if job.write().unwrap().get_status() == "Done" {
+                to_remove.push(*i_id);
+            }
+        }
+        for internal_id in to_remove {
+            self.jobs.remove(&internal_id);
+            let age_position = self.jobs_ages.iter().position(|&i_id| i_id == internal_id).unwrap();
+            self.jobs_ages.remove(age_position);
+        }
     }
 }
 
 impl<'a> IntoIterator for &'a BgJobList {
-    type Item = (&'a usize, &'a BackgroundJob);
-    type IntoIter = std::collections::hash_map::Iter<'a, usize, BackgroundJob>;
+    type Item = (&'a usize, &'a Rc<RwLock<BackgroundJob>>);
+    type IntoIter = std::collections::hash_map::Iter<'a, usize, Rc<RwLock<BackgroundJob>>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.jobs.iter()
     }
 }
 
-#[derive(Debug, Clone)]
-enum JobAge {
-    Latest,
-    Second,
-    Old,
-}
-
 struct BackgroundJob {
-    _pid: u32,
     command: String,
-    age: JobAge,
+    job: Child,
 }
 
 impl BackgroundJob {
-    fn new(_pid: u32, command: &str) -> Self {
-        Self { _pid, command: command.to_string(), age: JobAge::Old }
-    }
-    fn _get_pid(&self) -> u32 {
-        self._pid
+    fn new(command: &str, job: Child) -> Self {
+        Self { command: command.to_string(), job }
     }
     fn get_command(&self) -> String {
         self.command.clone()
     }
-    fn set_age(&mut self, age: JobAge) {
-        self.age = age;
-    }
-    fn get_age(&self) -> JobAge {
-        self.age.clone()
+    fn get_status(&mut self) -> String {
+        match self.job.try_wait() {
+            Ok(Some(_)) => "Done".to_string(),
+            Ok(None) => "Running".to_string(),
+            Err(_) => "".to_string(),
+        }
     }
 }
 
@@ -417,14 +423,17 @@ fn main() {
                 let jobs = &bg_jobs.into_iter().collect::<Vec<_>>();
                 let mut jobs = jobs.clone();
                 jobs.sort_by(|a, b| a.0.cmp(b.0));
+                let (latest, second) = &bg_jobs.get_recent();
                 for (internal_id, job) in jobs {
-                    let age = match job.get_age() {
-                        JobAge::Latest => "+",
-                        JobAge::Second => "-",
-                        JobAge::Old => " "
+                    let age = match internal_id {
+                        n if n == latest => '+',
+                        n if n == second => '-',
+                        _ => ' ',
                     };
-                    my_stdout.push_str(&format!("[{}]{}  Running                 {}\n", internal_id, age, job.get_command()));
+                    let status = job.write().unwrap().get_status();
+                    my_stdout.push_str(&format!("[{}]{}  {:24}{}\n", internal_id, age, status, job.read().unwrap().get_command()));
                 }
+                bg_jobs.reap();
             }
             _ => {
                 let result = find_executable(&command);
@@ -477,7 +486,7 @@ fn main() {
                         if redirect_stdout.is_some() || redirect_stderr.is_some() {
                             if is_background {
                                 let pid = program.id();
-                                let job = BackgroundJob::new(pid, &args.join(" "));
+                                let job = BackgroundJob::new(&args.join(" "), program);
                                 let internal_id = bg_jobs.insert_job(job);
                                 my_stdout = format!("[{}] {}\n", internal_id, pid);
                             } else {
@@ -488,7 +497,7 @@ fn main() {
                         } else {
                             if is_background {
                                 let pid = program.id();
-                                let job = BackgroundJob::new(pid, &args.join(" "));
+                                let job = BackgroundJob::new(&args.join(" "), program);
                                 let internal_id = bg_jobs.insert_job(job);
                                 my_stdout = format!("[{}] {}\n", internal_id, pid);
                             } else {
