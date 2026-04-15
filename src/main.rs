@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
@@ -8,6 +9,49 @@ use atty::Stream;
 
 use crate::modules::line_buffer::{LineBuffer, find_executable};
 mod modules;
+
+struct BgJobList {
+    jobs: HashMap<usize, BackgroundJob>,
+    latest_job: usize,
+}
+
+impl BgJobList {
+    fn new() -> Self {
+        Self { jobs: HashMap::new(), latest_job: 0 }
+    }
+    fn insert_job(&mut self, job: BackgroundJob) -> usize {
+        self.latest_job += 1;
+        let internal_id = self.latest_job;
+        self.jobs.insert(internal_id, job);
+        internal_id
+    }
+}
+
+impl<'a> IntoIterator for &'a BgJobList {
+    type Item = (&'a usize, &'a BackgroundJob);
+    type IntoIter = std::collections::hash_map::Iter<'a, usize, BackgroundJob>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.jobs.iter()
+    }
+}
+
+struct BackgroundJob {
+    _pid: u32,
+    command: String,
+}
+
+impl BackgroundJob {
+    fn new(_pid: u32, command: &str) -> Self {
+        Self { _pid, command: command.to_string() }
+    }
+    fn _get_pid(&self) -> u32 {
+        self._pid
+    }
+    fn get_command(&self) -> String {
+        self.command.clone()
+    }
+}
 
 fn read_key() -> String {
     let mut stdin = std::io::stdin();
@@ -129,6 +173,7 @@ fn main() {
     let mut passed_args = vec![];
     let mut child_processes = vec![];
     let mut is_background = false;
+    let mut bg_jobs = BgJobList::new();
 
     line_reader.set_builtins(&builtins);
 
@@ -344,7 +389,9 @@ fn main() {
                 }
             }
             "jobs" => {
-
+                for (internal_id, job) in &bg_jobs {
+                    my_stdout.push_str(&format!("[{}]+  Running                 {}\n", internal_id, job.get_command()));
+                }
             }
             _ => {
                 let result = find_executable(&command);
@@ -397,7 +444,9 @@ fn main() {
                         if redirect_stdout.is_some() || redirect_stderr.is_some() {
                             if is_background {
                                 let pid = program.id();
-                                my_stdout = format!("[1] {}\n", pid);
+                                let job = BackgroundJob::new(pid, &args.join(" "));
+                                let internal_id = bg_jobs.insert_job(job);
+                                my_stdout = format!("[{}] {}\n", internal_id, pid);
                             } else {
                                 let output = program.wait_with_output().unwrap();
                                 my_stdout.push_str(&String::from_utf8(output.stdout).unwrap_or_default());
@@ -406,7 +455,9 @@ fn main() {
                         } else {
                             if is_background {
                                 let pid = program.id();
-                                my_stdout.push_str(&format!("[1] {}\n", pid));
+                                let job = BackgroundJob::new(pid, &args.join(" "));
+                                let internal_id = bg_jobs.insert_job(job);
+                                my_stdout = format!("[{}] {}\n", internal_id, pid);
                             } else {
                                 program.wait().unwrap();
                             }
