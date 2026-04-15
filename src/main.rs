@@ -39,16 +39,25 @@ impl BgJobList {
             (0, 0)
         }
     }
-    fn reap(&mut self) {
+    fn reap(&mut self, print_reaped: bool) {
         let mut to_remove = vec![];
         for (i_id, job) in &self.jobs {
             if job.write().unwrap().get_status() == "Done" {
                 to_remove.push(*i_id);
             }
         }
-        for internal_id in to_remove {
-            self.jobs.remove(&internal_id);
-            let age_position = self.jobs_ages.iter().position(|&i_id| i_id == internal_id).unwrap();
+        let (latest, second) = self.get_recent();
+        for internal_id in &to_remove {
+            let old = self.jobs.remove(&internal_id);
+            if print_reaped && let Some(old) = old {
+                let age = match *internal_id {
+                    n if n == latest => '+',
+                    n if n == second => '-',
+                    _ => ' ',
+                };
+                println!("[{}]{}  Done                    {}", internal_id, age, old.read().unwrap().get_command());
+            }
+            let age_position = self.jobs_ages.iter().position(|i_id| i_id == internal_id).unwrap();
             self.jobs_ages.remove(age_position);
         }
     }
@@ -222,6 +231,8 @@ fn main() {
     }
 
     loop {
+        bg_jobs.reap(true);
+
         let mut args;
         let mut redirect_stdout = None;
         let mut redirect_stderr = None;
@@ -433,7 +444,7 @@ fn main() {
                     let status = job.write().unwrap().get_status();
                     my_stdout.push_str(&format!("[{}]{}  {:24}{}\n", internal_id, age, status, job.read().unwrap().get_command()));
                 }
-                bg_jobs.reap();
+                bg_jobs.reap(false);
             }
             _ => {
                 let result = find_executable(&command);
