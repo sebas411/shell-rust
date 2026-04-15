@@ -12,16 +12,27 @@ mod modules;
 
 struct BgJobList {
     jobs: HashMap<usize, BackgroundJob>,
+    current_job: usize,
     latest_job: usize,
+    second_latest_job: usize,
 }
 
 impl BgJobList {
     fn new() -> Self {
-        Self { jobs: HashMap::new(), latest_job: 0 }
+        Self { jobs: HashMap::new(), current_job: 0, latest_job: 0, second_latest_job: 0 }
     }
-    fn insert_job(&mut self, job: BackgroundJob) -> usize {
-        self.latest_job += 1;
-        let internal_id = self.latest_job;
+    fn insert_job(&mut self, mut job: BackgroundJob) -> usize {
+        self.current_job += 1;
+        let internal_id = self.current_job;
+        if let Some(second) = self.jobs.get_mut(&self.second_latest_job) {
+            second.set_age(JobAge::Old);
+        }
+        if let Some(latest) = self.jobs.get_mut(&self.latest_job) {
+            latest.set_age(JobAge::Second);
+            self.second_latest_job = self.latest_job;
+        }
+        job.set_age(JobAge::Latest);
+        self.latest_job = internal_id;
         self.jobs.insert(internal_id, job);
         internal_id
     }
@@ -36,20 +47,34 @@ impl<'a> IntoIterator for &'a BgJobList {
     }
 }
 
+#[derive(Debug, Clone)]
+enum JobAge {
+    Latest,
+    Second,
+    Old,
+}
+
 struct BackgroundJob {
     _pid: u32,
     command: String,
+    age: JobAge,
 }
 
 impl BackgroundJob {
     fn new(_pid: u32, command: &str) -> Self {
-        Self { _pid, command: command.to_string() }
+        Self { _pid, command: command.to_string(), age: JobAge::Old }
     }
     fn _get_pid(&self) -> u32 {
         self._pid
     }
     fn get_command(&self) -> String {
         self.command.clone()
+    }
+    fn set_age(&mut self, age: JobAge) {
+        self.age = age;
+    }
+    fn get_age(&self) -> JobAge {
+        self.age.clone()
     }
 }
 
@@ -389,8 +414,16 @@ fn main() {
                 }
             }
             "jobs" => {
-                for (internal_id, job) in &bg_jobs {
-                    my_stdout.push_str(&format!("[{}]+  Running                 {}\n", internal_id, job.get_command()));
+                let jobs = &bg_jobs.into_iter().collect::<Vec<_>>();
+                let mut jobs = jobs.clone();
+                jobs.sort_by(|a, b| a.0.cmp(b.0));
+                for (internal_id, job) in jobs {
+                    let age = match job.get_age() {
+                        JobAge::Latest => "+",
+                        JobAge::Second => "-",
+                        JobAge::Old => " "
+                    };
+                    my_stdout.push_str(&format!("[{}]{}  Running                 {}\n", internal_id, age, job.get_command()));
                 }
             }
             _ => {
