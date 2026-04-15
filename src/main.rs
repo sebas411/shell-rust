@@ -128,6 +128,7 @@ fn main() {
     let mut is_piped_in;
     let mut passed_args = vec![];
     let mut child_processes = vec![];
+    let mut is_background = false;
 
     line_reader.set_builtins(&builtins);
 
@@ -145,7 +146,7 @@ fn main() {
     }
 
     loop {
-        let args;
+        let mut args;
         let mut redirect_stdout = None;
         let mut redirect_stderr = None;
         let mut appending_stdout = false;
@@ -159,6 +160,12 @@ fn main() {
         } else {
             input = line_reader.read_line("$ ", interactive);
             args = split_args(&input);
+            if let Some(last) = args.last() && last == "&" {
+                args.pop();
+                is_background = true;
+            } else {
+                is_background = false;
+            }
             is_piped_in = false;
         }
         if args.len() == 0 {
@@ -337,7 +344,7 @@ fn main() {
                 }
             }
             "jobs" => {
-                
+
             }
             _ => {
                 let result = find_executable(&command);
@@ -388,16 +395,29 @@ fn main() {
                         child_processes.push(program);
                     } else {
                         if redirect_stdout.is_some() || redirect_stderr.is_some() {
-                            let output = program.wait_with_output().unwrap();
-                            my_stdout.push_str(&String::from_utf8(output.stdout).unwrap_or("".into()));
-                            my_stderr.push_str(&String::from_utf8(output.stderr).unwrap_or("".into()));
+                            if is_background {
+                                let pid = program.id();
+                                my_stdout = format!("[1] {}\n", pid);
+                            } else {
+                                let output = program.wait_with_output().unwrap();
+                                my_stdout.push_str(&String::from_utf8(output.stdout).unwrap_or_default());
+                                my_stderr.push_str(&String::from_utf8(output.stderr).unwrap_or_default());
+                            }
                         } else {
-                            program.wait().unwrap();
+                            if is_background {
+                                let pid = program.id();
+                                my_stdout.push_str(&format!("[1] {}\n", pid));
+                            } else {
+                                program.wait().unwrap();
+                            }
                         }
-                        // close all processes
-                        for _ in 0..child_processes.len() {
-                            let mut child = child_processes.pop().unwrap();
-                            child.kill().unwrap();
+                        
+                        if !is_background {
+                            // close all processes
+                            for _ in 0..child_processes.len() {
+                                let mut child = child_processes.pop().unwrap();
+                                child.kill().unwrap();
+                            }
                         }
                     }
                 } else {
