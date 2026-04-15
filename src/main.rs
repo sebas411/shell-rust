@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
@@ -16,15 +16,21 @@ struct BgJobList {
     jobs: HashMap<usize, Rc<RwLock<BackgroundJob>>>,
     jobs_ages: Vec<usize>,
     current_job: usize,
+    recyclable: BTreeSet<usize>,
 }
 
 impl BgJobList {
     fn new() -> Self {
-        Self { jobs: HashMap::new(), current_job: 0, jobs_ages: Vec::new() }
+        Self { jobs: HashMap::new(), current_job: 0, jobs_ages: Vec::new(), recyclable: BTreeSet::new() }
     }
     fn insert_job(&mut self, job: BackgroundJob) -> usize {
-        self.current_job += 1;
-        let internal_id = self.current_job;
+        let internal_id;
+        if let Some(recycled) = self.recyclable.pop_first() {
+            internal_id = recycled;
+        } else {
+            self.current_job += 1;
+            internal_id = self.current_job;
+        }
         self.jobs_ages.push(internal_id);
         self.jobs.insert(internal_id, Rc::new(RwLock::new(job)));
         internal_id
@@ -59,6 +65,7 @@ impl BgJobList {
             }
             let age_position = self.jobs_ages.iter().position(|i_id| i_id == internal_id).unwrap();
             self.jobs_ages.remove(age_position);
+            self.recyclable.insert(*internal_id);
         }
     }
 }
