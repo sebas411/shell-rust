@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
@@ -7,6 +8,7 @@ use std::process::{self, ChildStdout, Command, Stdio};
 use atty::Stream;
 mod modules;
 use crate::modules::bg_jobs::{BackgroundJob, BgJobList};
+use crate::modules::complete::CompleteConfig;
 use crate::modules::line_buffer::{LineBuffer, find_executable};
 
 fn read_key() -> String {
@@ -118,7 +120,7 @@ fn main() {
     let mut line_reader = LineBuffer::new();
     let mut input;
     let error_code;
-    let builtins = ["echo", "exit", "type", "pwd", "cd", "history", "jobs"];
+    let builtins = ["echo", "exit", "type", "pwd", "cd", "history", "jobs", "complete"];
     let mut current_dir = env::current_dir().unwrap();
     let mut history_appended = 0;
     let hist_file = env::var("HISTFILE").unwrap_or(String::from("~/.sebash_history"));
@@ -130,6 +132,7 @@ fn main() {
     let mut child_processes = vec![];
     let mut is_background = false;
     let mut bg_jobs = BgJobList::new();
+    let mut custom_completes = HashMap::new();
 
     line_reader.set_builtins(&builtins);
 
@@ -361,6 +364,51 @@ fn main() {
                     my_stdout.push_str(&format!("[{}]{}  {:24}{}\n", internal_id, age, status, job.read().unwrap().get_command()));
                 }
                 bg_jobs.reap(false);
+            }
+            "complete" => {
+                let mut is_print = false;
+                let mut is_set = false;
+                let mut completion_file = String::new();
+                let mut command_name = String::new();
+                let mut skip = false;
+
+                for i in 1..args.len() {
+                    if skip {
+                        skip = false;
+                        continue;
+                    }
+                    let arg = args[i].clone();
+                    match arg.as_str() {
+                        "-p" => {
+                            is_print = true;
+                        },
+                        "-C" => {
+                            is_set = true;
+                            if i < args.len() - 1 {
+                                skip = true;
+                                completion_file = args[i + 1].clone();
+                            }
+                        },
+                        _ => {
+                            command_name = arg;
+                            break;
+                        }
+                    }
+                }
+                if is_set {
+                    let complete = CompleteConfig::new(&command_name, &completion_file);
+                    custom_completes.insert(command_name, complete);
+                } else if is_print {
+                    match custom_completes.get(&command_name) {
+                        Some(complete_config) => {
+                            let custom_complete_file = complete_config.get_file();
+                            my_stdout.push_str(&format!("complete -C '{}' {}", custom_complete_file, command_name));
+                        }
+                        None => {
+                            my_stdout.push_str(&format!("complete: {}: no completion specification", command_name));
+                        }
+                    }
+                }
             }
             _ => {
                 let result = find_executable(&command);
