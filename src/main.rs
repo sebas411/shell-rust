@@ -402,10 +402,10 @@ fn main() {
                     match custom_completes.get(&command_name) {
                         Some(complete_config) => {
                             let custom_complete_file = complete_config.get_file();
-                            my_stdout.push_str(&format!("complete -C '{}' {}", custom_complete_file, command_name));
+                            my_stdout.push_str(&format!("complete -C '{}' {}\n", custom_complete_file, command_name));
                         }
                         None => {
-                            my_stdout.push_str(&format!("complete: {}: no completion specification", command_name));
+                            my_stdout.push_str(&format!("complete: {}: no completion specification\n", command_name));
                         }
                     }
                 }
