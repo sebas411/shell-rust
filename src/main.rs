@@ -5,6 +5,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{self, ChildStdout, Command, Stdio};
+use std::rc::Rc;
+use std::sync::RwLock;
 use atty::Stream;
 mod modules;
 use crate::modules::bg_jobs::{BackgroundJob, BgJobList};
@@ -117,7 +119,8 @@ fn split_args(input: &str) -> Vec<String> {
 fn main() {
     let is_codecrafters = env::var("CODECRAFTERS_TEST_RUNNER_ID").is_ok();
     let interactive = atty::is(Stream::Stdout) && !is_codecrafters;
-    let mut line_reader = LineBuffer::new();
+    let custom_completes = Rc::new(RwLock::new(HashMap::new()));
+    let mut line_reader = LineBuffer::new(custom_completes.clone());
     let mut input;
     let error_code;
     let builtins = ["echo", "exit", "type", "pwd", "cd", "history", "jobs", "complete"];
@@ -132,7 +135,6 @@ fn main() {
     let mut child_processes = vec![];
     let mut is_background = false;
     let mut bg_jobs = BgJobList::new();
-    let mut custom_completes = HashMap::new();
 
     line_reader.set_builtins(&builtins);
 
@@ -397,9 +399,9 @@ fn main() {
                 }
                 if is_set {
                     let complete = CompleteConfig::new(&command_name, &completion_file);
-                    custom_completes.insert(command_name, complete);
+                    custom_completes.write().unwrap().insert(command_name, complete);
                 } else if is_print {
-                    match custom_completes.get(&command_name) {
+                    match custom_completes.read().unwrap().get(&command_name) {
                         Some(complete_config) => {
                             let custom_complete_file = complete_config.get_file();
                             my_stdout.push_str(&format!("complete -C '{}' {}\n", custom_complete_file, command_name));

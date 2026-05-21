@@ -1,8 +1,8 @@
-use std::{env, fs, io::{self, Write}, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{collections::{HashMap}, env, fs, io::{self, Write}, os::unix::fs::PermissionsExt, path::PathBuf, rc::Rc, sync::RwLock};
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
-use crate::read_key;
+use crate::{modules::complete::CompleteConfig, read_key};
 
 fn find_common_prefix(hints: &Vec<String>) -> String {
     if hints.len() == 0 {
@@ -99,11 +99,12 @@ pub struct LineBuffer {
     builtins: Vec<String>,
     hints: Vec<String>,
     in_tab_completion: bool,
+    custom_completes: Rc<RwLock<HashMap<String,CompleteConfig>>>
 }
 
 impl LineBuffer {
-    pub fn new() -> Self {
-        Self { buf: vec![], cursor: 0, history: vec![], history_cursor: 0, builtins: vec![], hints: vec![], in_tab_completion: false }
+    pub fn new(custom_completes: Rc<RwLock<HashMap<String,CompleteConfig>>>) -> Self {
+        Self { buf: vec![], cursor: 0, history: vec![], history_cursor: 0, builtins: vec![], hints: vec![], in_tab_completion: false, custom_completes }
     }
 
     fn clear_hints(&mut self) {
@@ -170,49 +171,76 @@ impl LineBuffer {
         // filename completion
         if let Some((pre, post)) = current_string.rsplit_once(' ') && !pre.ends_with('\\') {
             let mut current_string = post;
-            let mut added_dir = String::new();
-            if let Some((current_dir, current_filepath)) = current_string.rsplit_once('/') {
-                added_dir = current_dir.to_string();
-                current_string = current_filepath;
-            }
-            let potential = find_file(&added_dir, current_string);
-            if potential.len() == 1 {
-                let mut completed_path = potential[0].clone();
-                if !added_dir.is_empty() {
-                    completed_path = format!("{}/{}", added_dir, completed_path);
+            if let Some(config) = self.custom_completes.read().unwrap().get(pre) {
+                let completes = config.get_output();
+                let mut potential = vec![];
+                for complete in completes {
+                    if !complete.is_empty() && complete.starts_with(post) {
+                        potential.push(complete.clone());
+                    }
                 }
-                let to_complete;
-                if PathBuf::from(completed_path.clone()).is_dir() {
-                    to_complete = format!("{} {}/", pre, completed_path);
+                if potential.len() == 1 {
+                    let to_complete = format!("{} {} ", pre, &potential[0]);
+                    self.buf = to_complete.chars().collect();
+                    self.cursor = self.buf.len();
                 } else {
-                    to_complete = format!("{} {} ", pre, completed_path);
+                    print!("\x07");
+                    io::stdout().flush().unwrap();
+                    if !potential.is_empty() {
+                        let common_prefix = find_common_prefix(&potential);
+                        if common_prefix != self.buf.iter().collect::<String>() {
+                            self.buf = format!("{} {}", pre, common_prefix).chars().collect();
+                            self.cursor = self.buf.len();
+                        }
+                        self.hints = potential;
+                        self.in_tab_completion = true;
+                    }
                 }
-                self.buf = to_complete.chars().collect();
-                self.cursor = self.buf.len();
             } else {
-                print!("\x07");
-                io::stdout().flush().unwrap();
-                if potential.len() > 1 {
-                    let mut hints = vec![];
-                    for entry in potential {
-                        let mut full_entry = entry;
-                        if !added_dir.is_empty() {
-                            full_entry = format!("{}/{}", added_dir, full_entry);
-                        }
-                        if PathBuf::from(&full_entry).is_dir() {
-                            full_entry.push('/');
-                        }
-                        hints.push(full_entry);
+                let mut added_dir = String::new();
+                if let Some((current_dir, current_filepath)) = current_string.rsplit_once('/') {
+                    added_dir = current_dir.to_string();
+                    current_string = current_filepath;
+                }
+                let potential = find_file(&added_dir, current_string);
+                if potential.len() == 1 {
+                    let mut completed_path = potential[0].clone();
+                    if !added_dir.is_empty() {
+                        completed_path = format!("{}/{}", added_dir, completed_path);
                     }
-                    let common_prefix = find_common_prefix(&hints);
-                    let full_command_line = format!("{} {}", pre, common_prefix);
-                    if full_command_line != self.buf.iter().collect::<String>() {
-                        self.buf = full_command_line.chars().collect();
-                        self.cursor = self.buf.len();
+                    let to_complete;
+                    if PathBuf::from(completed_path.clone()).is_dir() {
+                        to_complete = format!("{} {}/", pre, completed_path);
+                    } else {
+                        to_complete = format!("{} {} ", pre, completed_path);
                     }
-                    hints.sort();
-                    self.hints = hints;
-                    self.in_tab_completion = true;
+                    self.buf = to_complete.chars().collect();
+                    self.cursor = self.buf.len();
+                } else {
+                    print!("\x07");
+                    io::stdout().flush().unwrap();
+                    if potential.len() > 1 {
+                        let mut hints = vec![];
+                        for entry in potential {
+                            let mut full_entry = entry;
+                            if !added_dir.is_empty() {
+                                full_entry = format!("{}/{}", added_dir, full_entry);
+                            }
+                            if PathBuf::from(&full_entry).is_dir() {
+                                full_entry.push('/');
+                            }
+                            hints.push(full_entry);
+                        }
+                        let common_prefix = find_common_prefix(&hints);
+                        let full_command_line = format!("{} {}", pre, common_prefix);
+                        if full_command_line != self.buf.iter().collect::<String>() {
+                            self.buf = full_command_line.chars().collect();
+                            self.cursor = self.buf.len();
+                        }
+                        hints.sort();
+                        self.hints = hints;
+                        self.in_tab_completion = true;
+                    }
                 }
             }
         } else { // command completion
