@@ -179,6 +179,8 @@ impl LineBuffer {
                         potential.push(complete.clone());
                     }
                 }
+                potential.sort();
+                potential.dedup();
                 if potential.len() == 1 {
                     let to_complete = format!("{} {} ", pre, &potential[0]);
                     self.buf = to_complete.chars().collect();
