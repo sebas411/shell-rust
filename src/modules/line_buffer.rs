@@ -170,9 +170,9 @@ impl LineBuffer {
 
         // filename completion
         if let Some((pre, post)) = current_string.rsplit_once(' ') && !pre.ends_with('\\') {
-            let mut current_string = post;
-            if let Some(config) = self.custom_completes.read().unwrap().get(pre) {
-                let completes = config.get_output();
+            let command = pre.split(' ').next().unwrap_or_default();
+            if let Some(config) = self.custom_completes.read().unwrap().get(command) {
+                let completes = config.get_output(&current_string, self.cursor);
                 let mut potential = vec![];
                 for complete in completes {
                     if !complete.is_empty() && complete.starts_with(post) {
@@ -198,6 +198,7 @@ impl LineBuffer {
                 }
             } else {
                 let mut added_dir = String::new();
+                let mut current_string = post;
                 if let Some((current_dir, current_filepath)) = current_string.rsplit_once('/') {
                     added_dir = current_dir.to_string();
                     current_string = current_filepath;
