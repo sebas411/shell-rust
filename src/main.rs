@@ -369,6 +369,7 @@ fn main() {
             }
             "complete" => {
                 let mut is_print = false;
+                let mut is_remove = false;
                 let mut is_set = false;
                 let mut completion_file = String::new();
                 let mut command_name = String::new();
@@ -383,6 +384,9 @@ fn main() {
                     match arg.as_str() {
                         "-p" => {
                             is_print = true;
+                        },
+                        "-r" => {
+                            is_remove = true;
                         },
                         "-C" => {
                             is_set = true;
@@ -400,6 +404,8 @@ fn main() {
                 if is_set {
                     let complete = CompleteConfig::new(&command_name, &completion_file);
                     custom_completes.write().unwrap().insert(command_name, complete);
+                } else if is_remove {
+                    custom_completes.write().unwrap().remove(&command_name).unwrap();
                 } else if is_print {
                     match custom_completes.read().unwrap().get(&command_name) {
                         Some(complete_config) => {
