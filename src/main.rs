@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::env;
-use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -120,10 +119,11 @@ fn main() {
     let is_codecrafters = env::var("CODECRAFTERS_TEST_RUNNER_ID").is_ok();
     let interactive = atty::is(Stream::Stdout) && !is_codecrafters;
     let custom_completes = Rc::new(RwLock::new(HashMap::new()));
+    let mut shell_variables = HashMap::new();
     let mut line_reader = LineBuffer::new(custom_completes.clone());
     let mut input;
     let error_code;
-    let builtins = ["echo", "exit", "type", "pwd", "cd", "history", "jobs", "complete"];
+    let builtins = ["echo", "exit", "type", "pwd", "cd", "history", "jobs", "complete", "declare"];
     let mut current_dir = env::current_dir().unwrap();
     let mut history_appended = 0;
     let hist_file = env::var("HISTFILE").unwrap_or(String::from("~/.sebash_history"));
@@ -277,8 +277,7 @@ fn main() {
                 if path.iter().nth(0).unwrap() == "~" {
                     let old_path = path.clone();
                     path = PathBuf::from(env::var("HOME").unwrap());
-                    let sub_dir_vec: Vec<&OsStr> = old_path.iter().skip(1).collect();
-                    for d in sub_dir_vec {
+                    for d in old_path.iter().skip(1) {
                         path = path.join(d);
                     }
                 }
@@ -414,6 +413,44 @@ fn main() {
                         }
                         None => {
                             my_stdout.push_str(&format!("complete: {}: no completion specification\n", command_name));
+                        }
+                    }
+                }
+            }
+            "declare" => {
+                let mut is_print = false;
+                let mut skip = false;
+                let mut var_name = String::new();
+
+                for i in 1..args.len() {
+                    if skip {
+                        skip = false;
+                        continue;
+                    }
+                    let arg = &args[i];
+                    match arg.as_str() {
+                        "-p" => {
+                            is_print = true;
+                        },
+                        s if s.contains('=') => {
+                            let (v_name, v_value) = s.split_once('=').unwrap();
+                            shell_variables.insert(v_name.to_string(), v_value.to_string());
+                            break;
+                        }
+                        _ => {
+                            var_name = arg.clone();
+                            break;
+                        }
+                    }
+                }
+
+                if is_print {
+                    match shell_variables.get(&var_name) {
+                        Some(var_value) => {
+                            my_stdout.push_str(&format!("declare -- {}=\"{}\"\n", var_name, var_value));
+                        }
+                        None => {
+                            my_stdout.push_str(&format!("declare: {}: not found\n", var_name));
                         }
                     }
                 }
