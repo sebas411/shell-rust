@@ -115,6 +115,14 @@ fn split_args(input: &str) -> Vec<String> {
     args
 }
 
+fn is_alpha(c: &char) -> bool {
+    *c >= 'a' && *c <= 'z' || *c >= 'A' && *c <= 'Z' || *c == '_'
+}
+
+fn is_alpha_numeric(c: &char) -> bool {
+    is_alpha(c) || *c >= '0' && *c <= '9'
+}
+
 fn main() {
     let is_codecrafters = env::var("CODECRAFTERS_TEST_RUNNER_ID").is_ok();
     let interactive = atty::is(Stream::Stdout) && !is_codecrafters;
@@ -433,8 +441,24 @@ fn main() {
                             is_print = true;
                         },
                         s if s.contains('=') => {
-                            let (v_name, v_value) = s.split_once('=').unwrap();
-                            shell_variables.insert(v_name.to_string(), v_value.to_string());
+                            let (v_name, v_value) = s.rsplit_once('=').unwrap();
+                            let mut iterator = v_name.chars();
+                            let mut valid_var = true;
+                            if is_alpha(&iterator.next().unwrap()) {
+                                for c in iterator {
+                                    if !is_alpha_numeric(&c) {
+                                        valid_var = false;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                valid_var = false;
+                            }
+                            if valid_var {
+                                shell_variables.insert(v_name.to_string(), v_value.to_string());
+                            } else {
+                                my_stdout.push_str(&format!("declare: `{}': not a valid identifier\n", s));
+                            }
                             break;
                         }
                         _ => {
