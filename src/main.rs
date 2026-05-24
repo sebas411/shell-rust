@@ -42,7 +42,7 @@ fn read_key() -> String {
     (buf[0] as char).to_string()
 }
 
-fn split_args(input: &str) -> Vec<String> {
+fn split_args(input: &str, vars: Rc<RwLock<HashMap<String, String>>>) -> Vec<String> {
     let mut args = vec![];
     let mut current_arg = String::new();
     let mut in_whitespace = false;
@@ -50,6 +50,9 @@ fn split_args(input: &str) -> Vec<String> {
     let mut in_double_quotes = false;
     let mut last_backslash = false;
     let mut last_backslash_double_quote = false;
+    let mut in_var = false;
+    let mut in_braces = false;
+    let mut var_name = String::new();
 
     for c in input.chars() {
 
@@ -60,6 +63,28 @@ fn split_args(input: &str) -> Vec<String> {
                 current_arg.push(c);
             }
             continue;
+        }
+
+        if in_var {
+            if !in_braces && c == '{' {
+                in_braces = true;
+                continue;
+            } else if in_braces && c == '}' {
+                in_braces = false;
+                in_var = false;
+                current_arg.push_str(vars.read().unwrap().get(&var_name).unwrap_or(&String::new()));
+                var_name = String::new();
+                continue;
+            } else if is_alpha_numeric(&c) {
+                var_name.push(c);
+                continue;
+            } else {
+                in_braces = false;
+                in_var = false;
+                current_arg.push_str(vars.read().unwrap().get(&var_name).unwrap_or(&String::new()));
+                var_name = String::new();
+            }
+            
         }
 
         if in_double_quotes {
@@ -74,6 +99,8 @@ fn split_args(input: &str) -> Vec<String> {
             }
             if c == '"' && !last_backslash_double_quote {
                 in_double_quotes = false;
+            } else if c == '$' {
+                in_var = true;
             } else {
                 current_arg.push(c);
             }
@@ -103,11 +130,16 @@ fn split_args(input: &str) -> Vec<String> {
             }
             in_whitespace = false;
             continue;
+        } else if c == '$' {
+            in_var = true;
         } else {
             current_arg.push(c);
         }
         in_whitespace = false;
         last_backslash = false;
+    }
+    if in_var {
+        current_arg.push_str(vars.read().unwrap().get(&var_name).unwrap_or(&String::new()));
     }
     if current_arg != "" {
         args.push(current_arg);
@@ -127,7 +159,7 @@ fn main() {
     let is_codecrafters = env::var("CODECRAFTERS_TEST_RUNNER_ID").is_ok();
     let interactive = atty::is(Stream::Stdout) && !is_codecrafters;
     let custom_completes = Rc::new(RwLock::new(HashMap::new()));
-    let mut shell_variables = HashMap::new();
+    let shell_variables = Rc::new(RwLock::new(HashMap::new()));
     let mut line_reader = LineBuffer::new(custom_completes.clone());
     let mut input;
     let error_code;
@@ -175,7 +207,7 @@ fn main() {
             passed_args = vec![];
         } else {
             input = line_reader.read_line("$ ", interactive);
-            args = split_args(&input);
+            args = split_args(&input, shell_variables.clone());
             if let Some(last) = args.last() && last == "&" {
                 args.pop();
                 is_background = true;
@@ -455,7 +487,7 @@ fn main() {
                                 valid_var = false;
                             }
                             if valid_var {
-                                shell_variables.insert(v_name.to_string(), v_value.to_string());
+                                shell_variables.write().unwrap().insert(v_name.to_string(), v_value.to_string());
                             } else {
                                 my_stdout.push_str(&format!("declare: `{}': not a valid identifier\n", s));
                             }
@@ -469,7 +501,7 @@ fn main() {
                 }
 
                 if is_print {
-                    match shell_variables.get(&var_name) {
+                    match shell_variables.read().unwrap().get(&var_name) {
                         Some(var_value) => {
                             my_stdout.push_str(&format!("declare -- {}=\"{}\"\n", var_name, var_value));
                         }
