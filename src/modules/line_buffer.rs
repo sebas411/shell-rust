@@ -54,7 +54,18 @@ fn find_executable_hints(executable_name: &str) -> Vec<String> {
     hints_found
 }
 
-pub fn find_executable(executable_name: &str) -> Option<String> {
+pub fn find_executable(current_dir: &PathBuf, executable_name: &str) -> Option<String> {
+    let executable_mode = 493u16;
+    if executable_name.starts_with("./") || executable_name.starts_with("../") {
+        let path = current_dir.join(executable_name);
+        if let Ok(metadata) = fs::metadata(&path) && (metadata.permissions().mode() as u16 & executable_mode == executable_mode) {
+            let executable_string = path.to_str().unwrap().to_string();
+            println!("executable is {:?}", executable_string);
+            return Some(executable_string)
+        } else {
+            return None
+        }
+    }
     let path_var = env::var("PATH").unwrap();
     for dir_name in path_var.split(":") {
         let dir_path = PathBuf::from(dir_name);
@@ -68,8 +79,7 @@ pub fn find_executable(executable_name: &str) -> Option<String> {
         let metadata = fs::metadata(&exec_path).unwrap();
         let permissions = metadata.permissions();
         let mode: u16 = permissions.mode() as u16;
-        let executable: u16 = 493u16;
-        let is_executable = (mode & executable) == executable;
+        let is_executable = (mode & executable_mode) == executable_mode;
         if is_executable {
             return Some(String::from(exec_path.to_str().unwrap()));
         }

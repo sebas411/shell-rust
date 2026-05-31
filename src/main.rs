@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{self, ChildStdout, Command, Stdio};
 use std::rc::Rc;
@@ -48,6 +49,7 @@ fn split_args(input: &str, vars: Rc<RwLock<HashMap<String, String>>>) -> Vec<Str
     let mut in_whitespace = false;
     let mut in_single_quotes = false;
     let mut in_double_quotes = false;
+    let mut just_closed_quotes = false;
     let mut last_backslash = false;
     let mut last_backslash_double_quote = false;
     let mut in_var = false;
@@ -59,6 +61,7 @@ fn split_args(input: &str, vars: Rc<RwLock<HashMap<String, String>>>) -> Vec<Str
         if in_single_quotes {
             if c == '\'' {
                 in_single_quotes = false;
+                just_closed_quotes = true;
             } else {
                 current_arg.push(c);
             }
@@ -99,6 +102,7 @@ fn split_args(input: &str, vars: Rc<RwLock<HashMap<String, String>>>) -> Vec<Str
             }
             if c == '"' && !last_backslash_double_quote {
                 in_double_quotes = false;
+                just_closed_quotes = true;
             } else if c == '$' {
                 in_var = true;
             } else {
@@ -108,11 +112,14 @@ fn split_args(input: &str, vars: Rc<RwLock<HashMap<String, String>>>) -> Vec<Str
             continue;
         }
 
-        if c == ' ' {
+        if c == ' ' && !last_backslash {
             if in_whitespace {
                 continue;
             }
-            args.push(current_arg);
+            if just_closed_quotes || !current_arg.is_empty() {
+                args.push(current_arg);
+            }
+            just_closed_quotes = false;
             current_arg = String::new();
             in_whitespace = true;
             last_backslash = false;
@@ -293,7 +300,7 @@ fn main() {
                     }
                 }
                 if !found_builtin {
-                    let result = find_executable(&args[1]);
+                    let result = find_executable(&current_dir, &args[1]);
                     let found_executable = result.is_some();
         
                     if found_executable {
@@ -512,11 +519,11 @@ fn main() {
                 }
             }
             _ => {
-                let result = find_executable(&command);
+                let result = find_executable(&current_dir, &command);
                 let found_executable = result.is_some();
                 if found_executable {
                     let executable_path = PathBuf::from(result.unwrap());
-                    let executable_path = executable_path.file_name().unwrap();
+                    let crude_executable_path = executable_path.file_name().unwrap();
                     let mut program;
                     let stdin_config;
                     let stdout_config;
@@ -542,10 +549,10 @@ fn main() {
                     }
                     // start processes
                     if args.len() == 1 {
-                        program = Command::new(executable_path).current_dir(&current_dir).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
+                        program = Command::new(&executable_path).arg0(crude_executable_path).current_dir(&current_dir).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
                     } else {
                         let args_to_pass = args[1..].to_vec();
-                        program = Command::new(executable_path).current_dir(&current_dir).args(args_to_pass).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
+                        program = Command::new(&executable_path).arg0(crude_executable_path).current_dir(&current_dir).args(args_to_pass).stdin(stdin_config).stdout(stdout_config).stderr(stderr_config).spawn().unwrap();
                     }
                     // handle builtins stdin
                     if is_piped_in && last_builtin {
